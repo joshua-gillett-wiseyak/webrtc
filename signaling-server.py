@@ -8,9 +8,11 @@ data = {}
 async def offer(id: str = Form(...), sdp: str = Form(...), type: str = Form(...)):
     if type == "offer":
         data["offer"] = {"id" : id, "type" : type, "sdp" : sdp}
+        # print(data)
         return Response(status_code=status.HTTP_200_OK)
     else:
         return Response(status_code=status.HTTP_400_BAD_REQUEST)
+    
 
 @app.post('/answer', status_code=status.HTTP_200_OK)
 async def answer(id: str = Form(...), sdp: str = Form(...), type: str = Form(...)):
