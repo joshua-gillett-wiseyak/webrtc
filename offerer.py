@@ -1,7 +1,9 @@
 from aiortc import RTCIceCandidate, RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCIceServer
 import json
 import asyncio
-import requests
+import requests, aiohttp
+import recorder
+from aiortc.contrib.media import MediaPlayer, MediaStreamTrack
 
 SIGNALING_SERVER_URL = 'http://localhost:9999'
 ID = "offerer01"
@@ -16,26 +18,10 @@ async def main():
     config = RTCConfiguration(iceServers=[stun_server])
 
     peer_connection = RTCPeerConnection(configuration=config)
-    channel = peer_connection.createDataChannel("chat")
 
-    async def send_pings(channel):
-        num = 0
-        while True:
-            msg = "From Offerer: {}".format(num)
-            print("Sending via RTC Datachannel: ", msg)
-            channel.send(msg)
-            num+=1
-            await asyncio.sleep(1)
-
-    @channel.on("open")
-    def on_open():
-        print("channel openned")
-        channel.send("Hello from Offerer via Datachannel")
-        asyncio.ensure_future(send_pings(channel))
-
-    @channel.on("message")
-    def on_message(message):
-        print("Received via RTC Datachannel", message)
+    player = MediaPlayer('sample.wav')
+    print(player.audio)
+    peer_connection.addTrack(player.audio)
 
     # send offer
     await peer_connection.setLocalDescription(await peer_connection.createOffer())
