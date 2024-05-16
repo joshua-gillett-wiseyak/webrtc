@@ -1,4 +1,4 @@
-
+# How Signaling Server Works:
 1 - Peer 1(Offerer) - creates an offer, sends to signaling server
 
 	1-Creates offer
@@ -18,4 +18,16 @@
 4 - Peer 1(Offerer) - Receives the Answer
 
 	3-Sets Remote Description
+
+# Steps to run:
+>
+> pip install requirements.txt
+>
+> uvicorn signaling-server:app --host localhost --port 9999
+>
+> Run: 
+> python offerer.py
+>
+> After Recording has been completed, run: python answerer.py
+>
 	
