@@ -4,25 +4,27 @@ import requests
 from aiortc.contrib.media import  MediaStreamTrack
 import pyaudio
 
-SIGNALING_SERVER_URL = 'http://localhost:9999'
-ID = "offerer01"
+SIGNALING_SERVER_URL = 'http://localhost:9999' # endpoint of the signaling server to exchange sdp and ice
+ID = "offerer01" # To represent peer that offers audio recording
 
+# Define parameters for recording audio using PyAudio
 CHUNK = 1024
 FORMAT = pyaudio.paInt16
 CHANNELS = 2
 RATE = 44100
 RECORD_SECONDS = 5
 
-class MicrophoneAudioStream(MediaStreamTrack):
-    kind = "audio"
+# class MicrophoneAudioStream(MediaStreamTrack):
+#     kind = "audio"
 
-    def __init__(self, audio_buffer):
-        super().__init__()
-        self.audio_buffer = audio_buffer
+#     def __init__(self, audio_buffer):
+#         super().__init__()
+#         self.audio_buffer = audio_buffer
 
-    async def recv(self):
-        yield audio_buffer
+#     async def recv(self):
+#         yield audio_buffer
 
+# Define the main co-routine (Function)
 async def main():
     print("Starting")
 
@@ -33,10 +35,13 @@ async def main():
     config = RTCConfiguration(iceServers=[stun_server])
 
     peer_connection = RTCPeerConnection(configuration=config)
+
+    # Create a datachannel to pass the audio data to remote peer
     channel = peer_connection.createDataChannel("audio")
 
-    audio_buffer=b''
+    audio_buffer=b'' # audio buffer
 
+    # Record audio using PyAudio library
     p = pyaudio.PyAudio()
     stream = p.open(format=FORMAT,
                     channels=CHANNELS,
@@ -48,7 +53,7 @@ async def main():
 
     for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
         data = stream.read(CHUNK)
-        audio_buffer += data
+        audio_buffer += data # Add the audio data to audio buffer
 
     print("* done recording")
 
