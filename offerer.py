@@ -10,19 +10,21 @@ ID = "offerer01" # To represent peer that offers audio recording
 # Define parameters for recording audio using PyAudio
 CHUNK = 1024
 FORMAT = pyaudio.paInt16
-CHANNELS = 2
+CHANNELS = 1 # Should be Mono for Silero VAD i.e CHANNELS=1
 RATE = 44100
 RECORD_SECONDS = 5
 
-# class MicrophoneAudioStream(MediaStreamTrack):
-#     kind = "audio"
-
-#     def __init__(self, audio_buffer):
-#         super().__init__()
-#         self.audio_buffer = audio_buffer
-
-#     async def recv(self):
-#         yield audio_buffer
+async def send_audio(stream, channel):
+    print("* recording")
+    for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
+        data = stream.read(CHUNK)
+        if channel.readyState == "open":
+            channel.send(data)
+        await asyncio.sleep(0)  # Yield control to allow other tasks to run
+    print("* done recording")
+    channel.send('done')
+    stream.stop_stream()
+    stream.close()
 
 # Define the main co-routine (Function)
 async def main():
@@ -40,6 +42,7 @@ async def main():
     channel = peer_connection.createDataChannel("audio")
 
     audio_buffer=b'' # audio buffer
+    # audio_buffer=[]
 
     # Record audio using PyAudio library
     p = pyaudio.PyAudio()
@@ -49,32 +52,14 @@ async def main():
                     input=True,
                     frames_per_buffer=CHUNK)
 
-    print("* recording")
-
-    for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
-        data = stream.read(CHUNK)
-        audio_buffer += data # Add the audio data to audio buffer
-
-    print("* done recording")
-
-    stream.stop_stream()
-    stream.close()
-    p.terminate()
-
-    print("Starting streaming...")
-
     @channel.on("open")
     def on_open():
-        print("channel openned")
-        channel.send(audio_buffer)
+        print("channel opened")
+        asyncio.create_task(send_audio(stream,channel))
 
-    @channel.on("message")
-    def on_message(message):
-        print("Received via RTC Datachannel", message)
-
-    # # Add recorded audio as a track to the peer connection
-    # audio_track = MicrophoneAudioStream(audio_buffer)
-    # audio_track = peer_connection.addTrack(audio_track)
+    # @channel.on("message")
+    # def on_message(message):
+    #     print("Received via RTC Datachannel", message)
 
     # send offer
     await peer_connection.setLocalDescription(await peer_connection.createOffer())
@@ -95,7 +80,8 @@ async def main():
                 await peer_connection.setRemoteDescription(rd)
                 print(peer_connection.remoteDescription)
                 while True:
-                    print("Ready for Stuff")
+                    if not stream:
+                        print("Ready for Streaming")
                     await asyncio.sleep(1)
             else:
                 print("Wrong type")

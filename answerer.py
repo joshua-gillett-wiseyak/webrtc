@@ -8,14 +8,16 @@ SIGNALING_SERVER_URL = 'http://localhost:9999'
 ID = "answerer01"
 
 # Define a function to process the received message
-async def save_audio(message):
+async def save_audio(message_chunks):
+    audio_data_bytes=b''.join(message_chunks)
 
     # Write the audio data to a WAV file
     with wave.open('received-audio.wav', 'wb') as audio_file:
-        audio_file.setnchannels(2)
+        audio_file.setnchannels(1)
         audio_file.setsampwidth(2)
         audio_file.setframerate(44100)
-        audio_file.writeframes(message)
+        audio_file.writeframes(audio_data_bytes)
+        print('Received complete audio')
 
 # Main Co-routine 
 async def main():
@@ -29,15 +31,20 @@ async def main():
 
     peer_connection = RTCPeerConnection(configuration=config)
 
+    message_chunks=[]
+
     @peer_connection.on("datachannel")
     def on_datachannel(channel):
         print(channel, "-", "created by remote party")
         channel.send("Hello From Answerer via RTC Datachannel")
 
         @channel.on("message")
-        async def on_message(message):
+        def on_message(message):
             print("Received via RTC Datachannel: ", message)
-            await save_audio(message)
+            message_chunks.append(message)
+
+            if message == 'done':
+                asyncio.create_task(save_audio(message_chunks[0:len(message_chunks)-1]))
 
     # @peer_connection.on("track")
     # def on_track(track):
