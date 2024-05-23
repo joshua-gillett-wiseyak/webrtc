@@ -12,19 +12,22 @@ CHUNK = 1024
 FORMAT = pyaudio.paInt16
 CHANNELS = 1 # Should be Mono for Silero VAD i.e CHANNELS=1
 RATE = 44100
-RECORD_SECONDS = 5
+RECORD_SECONDS = 20
+
+recording=[True]
 
 async def send_audio(stream, channel):
-    print("* recording")
+    print("**** Recording ****")
     for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
         data = stream.read(CHUNK)
         if channel.readyState == "open":
             channel.send(data)
         await asyncio.sleep(0)  # Yield control to allow other tasks to run
-    print("* done recording")
+    print("**** Done recording ****")
     channel.send('done')
     stream.stop_stream()
     stream.close()
+    recording[0]=False
 
 # Define the main co-routine (Function)
 async def main():
@@ -41,7 +44,7 @@ async def main():
     # Create a datachannel to pass the audio data to remote peer
     channel = peer_connection.createDataChannel("audio")
 
-    audio_buffer=b'' # audio buffer
+    # audio_buffer=b'' # audio buffer
     # audio_buffer=[]
 
     # Record audio using PyAudio library
@@ -80,8 +83,8 @@ async def main():
                 await peer_connection.setRemoteDescription(rd)
                 print(peer_connection.remoteDescription)
                 while True:
-                    if not stream:
-                        print("Ready for Streaming")
+                    if recording[0]:
+                        print("Recording and Streaming to remote peer...")
                     await asyncio.sleep(1)
             else:
                 print("Wrong type")
