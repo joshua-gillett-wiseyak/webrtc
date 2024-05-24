@@ -74,24 +74,27 @@ async def main():
             async with async_lock:
                 received_chunks.append(message)
 
-    resp = requests.get(SIGNALING_SERVER_URL + "/get_offer")
+    while True:
+        try:
+            resp = requests.get(SIGNALING_SERVER_URL + "/get_offer")
+            print(resp.status_code)
+            # print(resp.json())
+            if resp.status_code == 200:
+                data = resp.json()
+                if data["type"] == "offer":
+                    rd = RTCSessionDescription(sdp=data["sdp"], type=data["type"])
+                    await peer_connection.setRemoteDescription(rd)
+                    await peer_connection.setLocalDescription(await peer_connection.createAnswer())
 
-    print(resp.status_code)
-    # print(resp.json())
-    if resp.status_code == 200:
-        data = resp.json()
-        if data["type"] == "offer":
-            rd = RTCSessionDescription(sdp=data["sdp"], type=data["type"])
-            await peer_connection.setRemoteDescription(rd)
-            await peer_connection.setLocalDescription(await peer_connection.createAnswer())
-
-            message = {"id": ID, "sdp": peer_connection.localDescription.sdp, "type": peer_connection.localDescription.type}
-            r = requests.post(SIGNALING_SERVER_URL + '/answer', data=message)
-            print(message)
-            asyncio.create_task(process_messages())
-            while True:
-                print("Ready for Stuff")
-                await asyncio.sleep(1)
+                    message = {"id": ID, "sdp": peer_connection.localDescription.sdp, "type": peer_connection.localDescription.type}
+                    r = requests.post(SIGNALING_SERVER_URL + '/answer', data=message)
+                    print(message)
+                    asyncio.create_task(process_messages())
+                    while True:
+                        print("Ready for Stuff")
+                        await asyncio.sleep(1)
+        except Exception as e:
+            print(e)
 
 asyncio.run(main())
 
