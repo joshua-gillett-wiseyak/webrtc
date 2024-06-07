@@ -4,9 +4,21 @@ from aiortc import RTCIceCandidate, RTCPeerConnection, RTCSessionDescription, RT
 import json
 from aiortc.contrib.media import MediaRecorder
 import asyncio
+import io
+import av
+from starlette.responses import StreamingResponse
 
 app = FastAPI()
 clients = set()
+
+# Global buffer to store audio data
+audio_buffer = io.BytesIO()
+
+class BufferMediaRecorder(MediaRecorder):
+    def __init__(self, buffer, format="wav"):
+        self.__container = av.open(buffer, format=format, mode="w")
+        self.__tracks = {}
+        super().__init__(buffer, format=format) 
 
 async def rtcConnection(message):
     stun_server = RTCIceServer(urls=["stun:stun.l.google.com:19302"])
@@ -14,7 +26,9 @@ async def rtcConnection(message):
     pc = RTCPeerConnection(configuration=config)
 
     # Record the received audio to a file
-    recorder = MediaRecorder('received_audio.wav')
+    # recorder = MediaRecorder('received_audio.wav')
+    # Record the received audio to the buffer
+    recorder = BufferMediaRecorder(audio_buffer)
 
     @pc.on("track")
     def on_track(track: MediaStreamTrack):
@@ -43,9 +57,22 @@ async def websocket_endpoint(websocket: WebSocket):
             answer = await rtcConnection(json.loads(message))
             print(answer)
             await websocket.send_text(answer)
+
+            # print(audio_buffer.tell())
+            # print(audio_buffer)
     except WebSocketDisconnect:
         clients.remove(websocket)
         print("Client disconnected")
     finally:
         clients.remove(websocket)
+
+@app.get("/audio")
+async def get_audio():
+    audio_buffer.seek(0)
+    # # Read the entire content of the buffer
+    # audio_data = audio_buffer.read()
+    
+    # # Print the audio data on the console
+    # print(audio_data)
+    return StreamingResponse(audio_buffer, media_type="audio/wav")
 

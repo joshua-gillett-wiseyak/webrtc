@@ -40,7 +40,7 @@ async def exchangeSDP():
             rd = RTCSessionDescription(sdp=response["sdp"], type=response["type"])
             await pc.setRemoteDescription(rd)
             print(pc.remoteDescription)
-            print("You can send mediastream object now")
+            print("Streaming...")
 
             
 asyncio.get_event_loop().run_until_complete(exchangeSDP())
