@@ -23,11 +23,11 @@
 >
 > pip install requirements.txt
 >
-> uvicorn signaling-server:app --host localhost --port 9999
+> python server.py
 >
 > Run: 
-> python offerer.py
+> python client.py
 >
-> After Recording has been completed, run: python answerer.py
+<!-- > After Recording has been completed, run: python answerer.py -->
 >
 	
