@@ -3,21 +3,22 @@ import json
 import requests
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCDataChannel, RTCConfiguration, RTCIceServer
 import logging
+import sys
 
 # logging.basicConfig(level=logging.DEBUG)
-async def run():
+async def run(client_id):
     config = RTCConfiguration(iceServers=[RTCIceServer(urls="stun:stun.l.google.com:19302")])
     pc = RTCPeerConnection(configuration=config)
     channel = pc.createDataChannel("chat")
 
     @channel.on("open")
     def on_open():
-        print("Channel opened")
-        channel.send('hello I\'m client')
+        print(f"Channel opened for client {client_id}")
+        channel.send(f'hello I\'m client {client_id}')
         
     @channel.on("message")
     def on_message(message):
-        print("Received via RTC Datachannel: ", message)
+        print(f"Received via RTC Datachannel for client {client_id}: ", message)
 
 
     await pc.setLocalDescription(await pc.createOffer())
@@ -26,25 +27,28 @@ async def run():
         "type": pc.localDescription.type
     }
 
-    print(sdp_offer)
+    # print(sdp_offer)
 
     try:
         response = requests.post("http://localhost:8000/offer", data=sdp_offer)
-        print(response)
+        # print(response)
         if response.status_code == 200:
             answer = response.json()
-            print(answer)
+            # print(answer)
             answer_desc = RTCSessionDescription(sdp=answer["sdp"], type=answer["type"])
             await pc.setRemoteDescription(answer_desc)
             while True:
-                print('waiting')
+                print('We are ready to send any data to the server')
                 await asyncio.sleep(5)
         else:
-            pass
             logging.error("Failed to get SDP answer: %s", response.content)
     except Exception as e:
         print(e)
         # logging.error("Error during SDP offer/answer exchange: %s", e)
     
 if __name__ == "__main__":
-    asyncio.run(run())
+    if len(sys.argv) != 2:
+        print("Usage: python client.py <client_id>")
+        sys.exit(1)
+    client_id = sys.argv[1]
+    asyncio.run(run(client_id))
