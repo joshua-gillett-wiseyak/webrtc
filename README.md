@@ -1,11 +1,11 @@
-# How Signaling Server Works:
-1 - Peer 1(Offerer) - creates an offer, sends to signaling server
+# How Signaling Works:
+1 - Peer 1(Client) - creates an offer, sends to webrtc server
 
 	1-Creates offer
 	
 	2-Sets Local Description
 	
-2 - Peer2 2(Answerer) - Requests for an offer, create an Answer
+2 - Peer2 2(Server) - Receives offers, create an Answer
 
 	1-Sets Remote Description
 	
@@ -13,20 +13,19 @@
 	
 	3-Sets Local Description
 	
-3 - Peer 2(Answerer) - Sends the Answer to signaling server
+3 - Peer 2(Server) - Sends the Answer as a response of the post request
 
-4 - Peer 1(Offerer) - Receives the Answer
+4 - Peer 1(Client) - Receives the Answer
 
 	3-Sets Remote Description
 
+5 - Finally the connection is established
 # Steps to run:
->
-> pip install requirements.txt
->
-> python server.py
->
-> Run: 
-> python client.py
+	pip install -r requirements.txt
+
+	python server.py 
+
+	python client.py <client_id>
 >
 <!-- > After Recording has been completed, run: python answerer.py -->
 >
