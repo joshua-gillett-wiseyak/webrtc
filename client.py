@@ -2,6 +2,7 @@ import asyncio
 import json
 import requests
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCDataChannel, RTCConfiguration, RTCIceServer
+from aiortc.contrib.media import MediaPlayer
 import logging
 import sys
 
@@ -14,12 +15,19 @@ async def run(client_id):
     @channel.on("open")
     def on_open():
         print(f"Channel opened for client {client_id}")
+        # for i in range(100):
         channel.send(f'hello I\'m client {client_id}')
         
     @channel.on("message")
     def on_message(message):
         print(f"Received via RTC Datachannel for client {client_id}: ", message)
 
+    # Capture audio from the audiofile and stream for now
+    player = MediaPlayer('./abhiboro.wav')
+    audio_track = player.audio
+
+    # Add audio track to the peer connection
+    pc.addTrack(audio_track)
 
     await pc.setLocalDescription(await pc.createOffer())
     sdp_offer = {
