@@ -23,7 +23,7 @@ async def run(client_id):
         print(f"Received via RTC Datachannel for client {client_id}: ", message)
 
     # Capture audio from the audiofile and stream for now
-    player = MediaPlayer('./abhiboro.wav')
+    player = MediaPlayer('./audiotest.wav')
     audio_track = player.audio
 
     # Add audio track to the peer connection
