@@ -91,6 +91,9 @@ async def get_audio():
     # print(audio_data)
     return StreamingResponse(audio_buffer, media_type="audio/wav")
 
+# test endpoint to break data into chunks
+# comment @app.get("/read-audio") and return statement
+# and uncomment asyncio.ensure_future(save_audio()) to run the co-routine asynchronously
 @app.get("/read-audio")
 async def save_audio():
     chunk_size=4096
