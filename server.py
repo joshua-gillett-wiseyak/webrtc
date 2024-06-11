@@ -10,29 +10,32 @@ import numpy as np
 import wave
 # import logging
 
-app = FastAPI()
-pcs = set()
+app = FastAPI() # Initialize the FastAPI 
+pcs = set() # set of peer connections
+client_buffer={} # {'c1':'io.BytesIO()', 'c2':'io.BytesIO()', ...} client buffer mapping dictionary
 # logging.basicConfig(level=logging.DEBUG)
-
-# Global (for now; have to isolate buffer for each client) buffer to store audio data
-audio_buffer = io.BytesIO()
 
 # Create a child class to MediaRecorder class to record audio data to a buffer
 class BufferMediaRecorder(MediaRecorder):
     def __init__(self, buffer, format="wav"):
-        self.__container = av.open(buffer, format=format, mode="w")
-        self.__tracks = {}
+        self.__container = av.open(buffer, format=format, mode="w") 
+        self.__tracks = {} 
         super().__init__(buffer, format=format) 
 
     
 # endpoint to accept offer from webrtc client for handshaking
 @app.post("/offer")
-async def offer_endpoint(sdp: str = Form(...), type: str = Form(...)):
+async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id: int = Form(...)):
     # logging.info(f"Received SDP: {sdp}, type: {type}")
-    config = RTCConfiguration(iceServers=[RTCIceServer(urls="stun:stun.l.google.com:19302")])
-    pc = RTCPeerConnection(configuration=config)
-    pcs.add(pc)
-    
+    config = RTCConfiguration(iceServers=[RTCIceServer(urls="stun:stun.l.google.com:19302")]) # make use of google's stun server
+    pc = RTCPeerConnection(configuration=config) # pass the config to configuration to make use of stun server
+    pcs.add(client_id) # add peer connection to set of peer connections
+
+    # Separate out buffer for each peer connection
+    audio_buffer = io.BytesIO()
+    client_buffer[client_id]=audio_buffer
+
+    # event handler for data channel
     @pc.on("datachannel")
     def on_datachannel(channel):
         channel.send(f"Hello I'm server")
@@ -42,11 +45,12 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...)):
             print(message)
             # logging.info(f"Message received: {message}")
 
-    # Record the received audio to a file
-    # recorder = MediaRecorder('received_audio.wav')
-    # Record the received audio to the buffer
+    # By default, records the received audio to a file
+    # example: recorder = MediaRecorder('received_audio.wav')
+    # To record the received audio to the buffer, Implement a child class to the main MediaRecorder class
     recorder = BufferMediaRecorder(audio_buffer)
 
+    # event handler for tracks (audio/video)
     @pc.on("track")
     def on_track(track: MediaStreamTrack):
         print(f"Track {track.kind} received")
@@ -61,6 +65,7 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...)):
             # asyncio.ensure_future(save_audio())
             # await pc.close()
 
+    # Handshake with the clients to make WebRTC Connections
     try:
         offer_desc = RTCSessionDescription(sdp=sdp, type=type)
         await pc.setRemoteDescription(offer_desc)
@@ -73,29 +78,33 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...)):
             "type": pc.localDescription.type
         }
 
-        print(response)
+        # print(response)
         # logging.info(f"Sending SDP answer: {response}")
-        return response
+        return response # respond with the sdp information of the server
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# end point to send audio back to the client
+# end point to send audio back to the client (for now just streaming the audio back to the client)
+# endpoint: /audio?client_id=<client_id>
 @app.get("/audio")
-async def get_audio():
-    audio_buffer.seek(0)
+async def get_audio(client_id: int):
+    print(client_buffer)
+    audio_buffer = client_buffer[client_id]
+    audio_buffer.seek(0) # seek the audio buffer to the start of the audio
     # # Read the entire content of the buffer
     # audio_data = audio_buffer.read()
     
     # # Print the audio data on the console
     # print(audio_data)
-    return StreamingResponse(audio_buffer, media_type="audio/wav")
+    return StreamingResponse(audio_buffer, media_type="audio/wav") 
 
 # test endpoint to break data into chunks
 # comment @app.get("/read-audio") and return statement
 # and uncomment asyncio.ensure_future(save_audio()) to run the co-routine asynchronously
 @app.get("/read-audio")
-async def save_audio():
+async def save_audio(client_id: int):
+    audio_buffer = client_buffer[client_id]
     chunk_size=4096
     audio_buffer.seek(0)
     data = []

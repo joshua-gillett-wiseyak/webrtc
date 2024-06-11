@@ -10,6 +10,7 @@ import sys
 async def run(client_id):
     config = RTCConfiguration(iceServers=[RTCIceServer(urls="stun:stun.l.google.com:19302")])
     pc = RTCPeerConnection(configuration=config)
+    print(id(pc))
     channel = pc.createDataChannel("chat")
 
     @channel.on("open")
@@ -32,7 +33,8 @@ async def run(client_id):
     await pc.setLocalDescription(await pc.createOffer())
     sdp_offer = {
         "sdp": pc.localDescription.sdp,
-        "type": pc.localDescription.type
+        "type": pc.localDescription.type,
+        "client_id": id(pc)
     }
 
     # print(sdp_offer)
