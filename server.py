@@ -72,6 +72,16 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
             # asyncio.ensure_future(save_audio())
             # await pc.close()
 
+    # Clean-up function for disconnection
+    @pc.on("connectionstatechange")
+    async def on_connectionstatechange():
+        # print(pc.connectionState)
+        if pc.connectionState in ["failed", "closed", "disconnected"]:
+            print(f"Connection state is {pc.connectionState}, cleaning up")
+            pcs.discard(client_id)
+            del client_buffer[client_id]
+            del client_chunks[client_id]
+
     # start writing to buffer with buffer_lock
     async def start_recorder(recorder): 
         async with buffer_lock:
@@ -159,6 +169,13 @@ async def save_audio(client_id: int):
     # return {"data":audio_buffer.read(),
     #         "index":audio_buffer.tell()}
 
+@app.get("/")
+def getClients():
+    return {
+        "clients": list(pcs),  # Convert set to list for JSON serialization
+        "client_buffer": list(client_buffer.keys()),  # Get all client IDs in the buffer
+        "client_chunks": {client_id: len(chunks) for client_id, chunks in client_chunks.items()}  # Get all client chunks and their sizes
+    }
 
 
 if __name__ == "__main__":
