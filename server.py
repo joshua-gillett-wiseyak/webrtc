@@ -10,10 +10,14 @@ import numpy as np
 import wave
 # import logging
 
+
+buffer_lock = asyncio.Lock() # buffer_lock to avoid race condition
 app = FastAPI() # Initialize the FastAPI 
 pcs = set() # set of peer connections
-client_buffer={} # {'c1':'io.BytesIO()', 'c2':'io.BytesIO()', ...} client buffer mapping dictionary
+client_buffer={} # {'c1':'io.BytesIO()', 'c2':'io.BytesIO()', ...} client buffer mapping dictionary to store streaming audio data into buffer
+client_chunks={} # {'c1':[], 'c2':[], ...} client - list mapping dictionary to read from the buffer and check if audio is available in the chunks
 # logging.basicConfig(level=logging.DEBUG)
+
 
 # Create a child class to MediaRecorder class to record audio data to a buffer
 class BufferMediaRecorder(MediaRecorder):
@@ -34,6 +38,7 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
     # Separate out buffer for each peer connection
     audio_buffer = io.BytesIO()
     client_buffer[client_id]=audio_buffer
+    client_chunks[client_id]=[]
 
     # event handler for data channel
     @pc.on("datachannel")
@@ -56,7 +61,9 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
         print(f"Track {track.kind} received")
         if track.kind == "audio":
             recorder.addTrack(track)
-            asyncio.ensure_future(recorder.start())
+            # asyncio.ensure_future(recorder.start())
+            asyncio.ensure_future(start_recorder(recorder))
+            asyncio.ensure_future(read_buffer_chunks(client_id))
 
         @track.on("ended")
         async def on_ended():
@@ -64,6 +71,25 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
             await recorder.stop()
             # asyncio.ensure_future(save_audio())
             # await pc.close()
+
+    # start writing to buffer with buffer_lock
+    async def start_recorder(recorder): 
+        async with buffer_lock:
+            await recorder.start()
+    
+    async def read_buffer_chunks(client_id):
+        while True:
+            await asyncio.sleep(1)  # adjust the sleep time based on your requirements
+            async with buffer_lock:
+                audio_buffer = client_buffer[client_id]
+                audio_buffer.seek(0, io.SEEK_END)
+                size = audio_buffer.tell()
+                audio_buffer.seek(0, io.SEEK_SET)
+                chunk = audio_buffer.read(size)
+                if chunk:
+                    client_chunks[client_id].append(chunk)
+                audio_buffer.seek(0)
+                audio_buffer.truncate()
 
     # Handshake with the clients to make WebRTC Connections
     try:
@@ -99,36 +125,41 @@ async def get_audio(client_id: int):
     # print(audio_data)
     return StreamingResponse(audio_buffer, media_type="audio/wav") 
 
+
 # test endpoint to break data into chunks
 # comment @app.get("/read-audio") and return statement
 # and uncomment asyncio.ensure_future(save_audio()) to run the co-routine asynchronously
 @app.get("/read-audio")
 async def save_audio(client_id: int):
-    audio_buffer = client_buffer[client_id]
-    chunk_size=4096
-    audio_buffer.seek(0)
-    data = []
-    while True:
-        # Read a chunk of bytes from the buffer
-        chunk = audio_buffer.read(chunk_size)  # Adjust chunk size as needed
-        # print(chunk)
-        # Break the loop if no more data is available
-        if not chunk:
-            break
+    # audio_buffer = client_buffer[client_id]
+    # chunk_size=4096
+    # audio_buffer.seek(0)
+    # data = []
+    # while True:
+    #     # Read a chunk of bytes from the buffer
+    #     chunk = audio_buffer.read(chunk_size)  # Adjust chunk size as needed
+    #     # print(chunk)
+    #     # Break the loop if no more data is available
+    #     if not chunk:
+    #         break
 
-        # Append the chunk to the popped data
-        data.append(chunk) 
+    #     # Append the chunk to the popped data
+    #     data.append(chunk) 
 
-    audio_data_bytes = b''.join(data)
-    # audio_array = np.frombuffer(audio_data_bytes, dtype=np.int16)
-    with wave.open('abhi.wav', 'wb') as wf:
-        wf.setnchannels(2)
-        wf.setsampwidth(2)
-        wf.setframerate(44100)
-        wf.writeframes(audio_data_bytes)
+    # audio_data_bytes = b''.join(data)
+    # # audio_array = np.frombuffer(audio_data_bytes, dtype=np.int16)
+    # with wave.open('abhi.wav', 'wb') as wf:
+    #     wf.setnchannels(2)
+    #     wf.setsampwidth(2)
+    #     wf.setframerate(44100)
+    #     wf.writeframes(audio_data_bytes)
+    chunks=client_chunks[client_id]
+    # print(chunks)
+    return {"index":len(chunks)}
+    # return {"data":audio_buffer.read(),
+    #         "index":audio_buffer.tell()}
 
-    return {"data":audio_buffer.read(),
-            "index":audio_buffer.tell()}
+
 
 if __name__ == "__main__":
     import uvicorn
