@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Form
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCIceServer, MediaStreamTrack
 import json
 import asyncio
-from aiortc.contrib.media import MediaRecorder
+from aiortc.contrib.media import MediaRecorder, MediaPlayer
 import av
 import io
 from starlette.responses import StreamingResponse
@@ -21,12 +21,17 @@ client_chunks={} # {'c1':[], 'c2':[], ...} client - list mapping dictionary to r
 
 # Create a child class to MediaRecorder class to record audio data to a buffer
 class BufferMediaRecorder(MediaRecorder):
+    """
+    A subclass of MediaRecorder that supports using BytesIO buffer as output.
+    
+    :param buffer: The buffer containing audio data as a BytesIO object.
+    """
     def __init__(self, buffer, format="wav"):
         self.__container = av.open(buffer, format=format, mode="w") 
         self.__tracks = {} 
         super().__init__(buffer, format=format) 
 
-    
+
 # endpoint to accept offer from webrtc client for handshaking
 @app.post("/offer")
 async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id: int = Form(...)):
@@ -40,6 +45,11 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
     client_buffer[client_id]=audio_buffer
     client_chunks[client_id]=[]
 
+    # By default, records the received audio to a file
+    # example: recorder = MediaRecorder('received_audio.wav')
+    # To record the received audio to the buffer, Implement a child class to the main MediaRecorder class
+    recorder = BufferMediaRecorder(audio_buffer)
+
     # event handler for data channel
     @pc.on("datachannel")
     def on_datachannel(channel):
@@ -50,10 +60,6 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
             print(message)
             # logging.info(f"Message received: {message}")
 
-    # By default, records the received audio to a file
-    # example: recorder = MediaRecorder('received_audio.wav')
-    # To record the received audio to the buffer, Implement a child class to the main MediaRecorder class
-    recorder = BufferMediaRecorder(audio_buffer)
 
     # event handler for tracks (audio/video)
     @pc.on("track")
@@ -61,6 +67,8 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
         print(f"Track {track.kind} received")
         if track.kind == "audio":
             recorder.addTrack(track)
+            pc.addTrack(MediaPlayer('./serverToClient.wav').audio)
+
             # asyncio.ensure_future(recorder.start())
             asyncio.ensure_future(start_recorder(recorder))
             asyncio.ensure_future(read_buffer_chunks(client_id))
@@ -139,8 +147,8 @@ async def get_audio(client_id: int):
 # test endpoint to break data into chunks
 # comment @app.get("/read-audio") and return statement
 # and uncomment asyncio.ensure_future(save_audio()) to run the co-routine asynchronously
-@app.get("/read-audio")
-async def save_audio(client_id: int):
+## @app.get("/read-audio")
+## async def save_audio(client_id: int):
     # audio_buffer = client_buffer[client_id]
     # chunk_size=4096
     # audio_buffer.seek(0)
@@ -163,9 +171,9 @@ async def save_audio(client_id: int):
     #     wf.setsampwidth(2)
     #     wf.setframerate(44100)
     #     wf.writeframes(audio_data_bytes)
-    chunks=client_chunks[client_id]
+    ## chunks=client_chunks[client_id]
     # print(chunks)
-    return {"index":len(chunks)}
+    ## return {"index":len(chunks)}
     # return {"data":audio_buffer.read(),
     #         "index":audio_buffer.tell()}
 

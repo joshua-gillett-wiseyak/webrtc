@@ -1,8 +1,8 @@
 import asyncio
 import json
 import requests
-from aiortc import RTCPeerConnection, RTCSessionDescription, RTCDataChannel, RTCConfiguration, RTCIceServer
-from aiortc.contrib.media import MediaPlayer
+from aiortc import RTCPeerConnection, RTCSessionDescription, RTCDataChannel, RTCConfiguration, RTCIceServer, MediaStreamTrack
+from aiortc.contrib.media import MediaPlayer, MediaRecorder
 import logging
 import sys
 
@@ -12,6 +12,8 @@ async def run(client_id):
     pc = RTCPeerConnection(configuration=config)
     print(id(pc))
     channel = pc.createDataChannel("chat")
+
+    recorder = MediaRecorder('./receivedFromServer.wav')
 
     @channel.on("open")
     def on_open():
@@ -23,13 +25,31 @@ async def run(client_id):
     def on_message(message):
         print(f"Received via RTC Datachannel for client {client_id}: ", message)
 
+    @pc.on("track")
+    async def on_track(track):
+        print("Track %s received", track.kind)
+
+        if track.kind == "audio":
+            recorder.addTrack(track)
+            await recorder.start()
+            
+        @track.on("ended")
+        async def on_ended():
+            print("Track %s ended", track.kind)
+            await recorder.stop()
+            # asyncio.ensure_future(save_audio())
+            # await pc.close()
+
     # Capture audio from the audiofile and stream for now
     player = MediaPlayer('./audiotest.wav')
     audio_track = player.audio
 
     # Add audio track to the peer connection
     pc.addTrack(audio_track)
-
+    
+    # Audio Received from the server will be saved to a file for now
+    
+    
     await pc.setLocalDescription(await pc.createOffer())
     sdp_offer = {
         "sdp": pc.localDescription.sdp,
@@ -37,7 +57,7 @@ async def run(client_id):
         "client_id": id(pc)
     }
 
-    # print(sdp_offer)
+    
 
     try:
         response = requests.post("http://localhost:8000/offer", data=sdp_offer)
@@ -50,6 +70,8 @@ async def run(client_id):
             while True:
                 print('We are ready to send any data to the server')
                 await asyncio.sleep(5)
+                # print(sdp_offer)
+                
         else:
             logging.error("Failed to get SDP answer: %s", response.content)
     except Exception as e:
