@@ -67,12 +67,13 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
         print(f"Track {track.kind} received")
         if track.kind == "audio":
             recorder.addTrack(track)
-            pc.addTrack(MediaPlayer('./serverToClient.wav').audio)
-
+            
             # asyncio.ensure_future(recorder.start())
             asyncio.ensure_future(start_recorder(recorder))
             asyncio.ensure_future(read_buffer_chunks(client_id))
 
+            pc.addTrack(MediaPlayer('./serverToClient.wav').audio)
+            
         @track.on("ended")
         async def on_ended():
             print(f"Track {track.kind} ended")
@@ -96,6 +97,7 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
             await recorder.start()
     
     async def read_buffer_chunks(client_id):
+
         while True:
             await asyncio.sleep(1)  # adjust the sleep time based on your requirements
             async with buffer_lock:
@@ -121,13 +123,14 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
             "sdp": pc.localDescription.sdp,
             "type": pc.localDescription.type
         }
-
-        # print(response)
+        
+        print(response)
         # logging.info(f"Sending SDP answer: {response}")
         return response # respond with the sdp information of the server
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # end point to send audio back to the client (for now just streaming the audio back to the client)
 # endpoint: /audio?client_id=<client_id>
@@ -188,4 +191,4 @@ def getClients():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000) # Increase the number of workers as needed and limit_max_requests
+    uvicorn.run(app, host="localhost", port=8000) # Increase the number of workers as needed and limit_max_requests
