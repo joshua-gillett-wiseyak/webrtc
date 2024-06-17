@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, Form
-from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCIceServer, MediaStreamTrack
+from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCIceServer, MediaStreamTrack, AudioStreamTrack
 import json
 import asyncio
 from aiortc.contrib.media import MediaRecorder, MediaPlayer
@@ -8,16 +8,18 @@ import io
 from starlette.responses import StreamingResponse
 import numpy as np
 import wave
+import requests
 # import logging
 
-
-buffer_lock = asyncio.Lock() # buffer_lock to avoid race condition
 app = FastAPI() # Initialize the FastAPI 
+
 pcs = set() # set of peer connections
 client_buffer={} # {'c1':'io.BytesIO()', 'c2':'io.BytesIO()', ...} client buffer mapping dictionary to store streaming audio data into buffer
 client_chunks={} # {'c1':[], 'c2':[], ...} client - list mapping dictionary to read from the buffer and check if audio is available in the chunks
+client_datachannels={} # {'c1': channelC1, 'c2':channelC2, ...} client - datachannels mapping dictionary to make channel accessible outside of the event handler
 # logging.basicConfig(level=logging.DEBUG)
 
+buffer_lock = asyncio.Lock() # buffer_lock to avoid race condition
 
 # Create a child class to MediaRecorder class to record audio data to a buffer
 class BufferMediaRecorder(MediaRecorder):
@@ -53,6 +55,7 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
     # event handler for data channel
     @pc.on("datachannel")
     def on_datachannel(channel):
+        client_datachannels[client_id]=channel # to make datachannel accessible outside of this scope
         channel.send(f"Hello I'm server")
 
         @channel.on("message")
@@ -73,6 +76,7 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
             asyncio.ensure_future(read_buffer_chunks(client_id))
 
             pc.addTrack(MediaPlayer('./serverToClient.wav').audio)
+            # pc.addTrack(AudioStreamTrack())
             
         @track.on("ended")
         async def on_ended():
@@ -110,6 +114,43 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
                     client_chunks[client_id].append(chunk)
                 audio_buffer.seek(0)
                 audio_buffer.truncate()
+
+                # get the client's datachannel 
+                dc=client_datachannels[client_id]
+                dc.send("Iteration inside While Loop")
+
+                
+            # if audio:
+            #     pass 
+            # else:
+            #     config = RTCConfiguration(iceServers=[RTCIceServer(urls="stun:stun.l.google.com:19302")])
+            #     pc1 = RTCPeerConnection(configuration=config)
+            #     pc1.addTrack(MediaPlayer('./serverToClient.wav').audio)
+            #     await pc1.setLocalDescription(await pc.createOffer())
+
+            #     sdp_offer = {
+            #         "sdp": pc1.localDescription.sdp,
+            #         "type": pc1.localDescription.type,
+            #         "client_id": id(pc1)
+            #     }
+                
+            #     try:
+            #         response = requests.post("http://localhost:8001/offer", data=sdp_offer)
+            #         # print(response)
+            #         if response.status_code == 200:
+            #             answer = response.json()
+            #             # print(answer)
+            #             answer_desc = RTCSessionDescription(sdp=answer["sdp"], type=answer["type"])
+            #             await pc.setRemoteDescription(answer_desc)
+            #             while True:
+            #                 print('We are ready to send any data to the server')
+            #                 await asyncio.sleep(5)
+            #                 # print(sdp_offer)
+                            
+            #         else:
+            #             print("Failed to get SDP answer: ", response.content)
+            #     except Exception as e:
+            #         print(e)
 
     # Handshake with the clients to make WebRTC Connections
     try:

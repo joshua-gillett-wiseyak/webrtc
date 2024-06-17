@@ -49,7 +49,6 @@ async def run(client_id):
     
     # Audio Received from the server will be saved to a file for now
     
-    
     await pc.setLocalDescription(await pc.createOffer())
     sdp_offer = {
         "sdp": pc.localDescription.sdp,
@@ -57,7 +56,6 @@ async def run(client_id):
         "client_id": id(pc)
     }
 
-    
     try:
         response = requests.post("http://localhost:8000/offer", data=sdp_offer)
         # print(response)
