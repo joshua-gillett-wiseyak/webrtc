@@ -5,12 +5,17 @@ from aiortc import RTCPeerConnection, RTCSessionDescription, RTCDataChannel, RTC
 from aiortc.contrib.media import MediaPlayer, MediaRecorder
 import logging
 import sys
+import uuid
 
 # logging.basicConfig(level=logging.DEBUG)
 async def run(client_id):
+
+    client_id=str(uuid.uuid4()) # globally unique id for this client
+    print("Client ID:",client_id)
+
     config = RTCConfiguration(iceServers=[RTCIceServer(urls="stun:stun.l.google.com:19302")])
     pc = RTCPeerConnection(configuration=config)
-    print(id(pc))
+    # print(id(pc))
     channel = pc.createDataChannel("chat")
 
     recorder = MediaRecorder('./receivedFromServer.wav')
@@ -27,7 +32,7 @@ async def run(client_id):
 
     @pc.on("track")
     async def on_track(track):
-        print("Track %s received", track.kind)
+        print(f"Track{track.kind} received. Make sure .start() is called to start recording")
 
         if track.kind == "audio":
             recorder.addTrack(track)
@@ -53,7 +58,7 @@ async def run(client_id):
     sdp_offer = {
         "sdp": pc.localDescription.sdp,
         "type": pc.localDescription.type,
-        "client_id": id(pc)
+        "client_id": client_id
     }
 
     try:
