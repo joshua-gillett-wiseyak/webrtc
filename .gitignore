@@ -1,1 +1,7 @@
 __pycache__
+Client.Dockerfile
+Server.Dockerfile
+docker-compose.yml
+test.py
+test2.py
+testsound.wav
