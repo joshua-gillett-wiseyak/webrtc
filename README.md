@@ -42,7 +42,7 @@ Then:
 
 	python server.py 
 
-	python client.py <client_id>
+	python client.py <client_id> # client_id can be anything; the program creates a random number for this client.
 >
 <!-- > After Recording has been completed, run: python answerer.py -->
 >
