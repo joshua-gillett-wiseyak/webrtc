@@ -36,7 +36,7 @@ class BufferMediaRecorder(MediaRecorder):
 
 # endpoint to accept offer from webrtc client for handshaking
 @app.post("/offer")
-async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id: int = Form(...)):
+async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id: str = Form(...)):
     # logging.info(f"Received SDP: {sdp}, type: {type}")
     config = RTCConfiguration(iceServers=[RTCIceServer(urls="stun:stun.l.google.com:19302")]) # make use of google's stun server
     pc = RTCPeerConnection(configuration=config) # pass the config to configuration to make use of stun server
@@ -67,7 +67,7 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
     # event handler for tracks (audio/video)
     @pc.on("track")
     def on_track(track: MediaStreamTrack):
-        print(f"Track {track.kind} received")
+        print(f"Track {track.kind} received. Make sure to use .start() to start recording to buffer")
         if track.kind == "audio":
             recorder.addTrack(track)
             # audio_sender=pc.addTrack(MediaPlayer('./serverToClient.wav').audio)
@@ -102,7 +102,7 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
             await recorder.start()
     
     async def read_buffer_chunks(audio_sender,client_id):
-        await asyncio.sleep(5)
+        await asyncio.sleep(10)
         audio_sender.replaceTrack(MediaPlayer('./serverToClient.wav').audio)
 
         while True:
@@ -121,39 +121,6 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
                 # get the client's datachannel 
                 dc=client_datachannels[client_id]
                 dc.send("Iteration inside While Loop")
-
-                
-            # if audio:
-            #     pass 
-            # else:
-            #     config = RTCConfiguration(iceServers=[RTCIceServer(urls="stun:stun.l.google.com:19302")])
-            #     pc1 = RTCPeerConnection(configuration=config)
-            #     pc1.addTrack(MediaPlayer('./serverToClient.wav').audio)
-            #     await pc1.setLocalDescription(await pc.createOffer())
-
-            #     sdp_offer = {
-            #         "sdp": pc1.localDescription.sdp,
-            #         "type": pc1.localDescription.type,
-            #         "client_id": id(pc1)
-            #     }
-                
-            #     try:
-            #         response = requests.post("http://localhost:8001/offer", data=sdp_offer)
-            #         # print(response)
-            #         if response.status_code == 200:
-            #             answer = response.json()
-            #             # print(answer)
-            #             answer_desc = RTCSessionDescription(sdp=answer["sdp"], type=answer["type"])
-            #             await pc.setRemoteDescription(answer_desc)
-            #             while True:
-            #                 print('We are ready to send any data to the server')
-            #                 await asyncio.sleep(5)
-            #                 # print(sdp_offer)
-                            
-            #         else:
-            #             print("Failed to get SDP answer: ", response.content)
-            #     except Exception as e:
-            #         print(e)
 
     # Handshake with the clients to make WebRTC Connections
     try:
