@@ -70,12 +70,13 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
         print(f"Track {track.kind} received")
         if track.kind == "audio":
             recorder.addTrack(track)
-            
+            # audio_sender=pc.addTrack(MediaPlayer('./serverToClient.wav').audio)
+            audio_sender=pc.addTrack(AudioStreamTrack())
             # asyncio.ensure_future(recorder.start())
             asyncio.ensure_future(start_recorder(recorder))
-            asyncio.ensure_future(read_buffer_chunks(client_id))
+            asyncio.ensure_future(read_buffer_chunks(audio_sender,client_id))
 
-            pc.addTrack(MediaPlayer('./serverToClient.wav').audio)
+            
             # pc.addTrack(AudioStreamTrack())
             
         @track.on("ended")
@@ -100,7 +101,9 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
         async with buffer_lock:
             await recorder.start()
     
-    async def read_buffer_chunks(client_id):
+    async def read_buffer_chunks(audio_sender,client_id):
+        await asyncio.sleep(5)
+        audio_sender.replaceTrack(MediaPlayer('./serverToClient.wav').audio)
 
         while True:
             await asyncio.sleep(1)  # adjust the sleep time based on your requirements
