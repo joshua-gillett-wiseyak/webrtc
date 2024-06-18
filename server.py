@@ -71,10 +71,10 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
         if track.kind == "audio":
             recorder.addTrack(track)
             # audio_sender=pc.addTrack(MediaPlayer('./serverToClient.wav').audio)
-            audio_sender=pc.addTrack(AudioStreamTrack())
+            # audio_sender=pc.addTrack(AudioStreamTrack())
             # asyncio.ensure_future(recorder.start())
             asyncio.ensure_future(start_recorder(recorder))
-            asyncio.ensure_future(read_buffer_chunks(audio_sender,client_id))
+            # asyncio.ensure_future(read_buffer_chunks(audio_sender,client_id))
 
             
             # pc.addTrack(AudioStreamTrack())
@@ -93,13 +93,13 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
         if pc.connectionState in ["failed", "closed", "disconnected"]:
             print(f"Connection state is {pc.connectionState}, cleaning up")
             pcs.discard(client_id)
-            del client_buffer[client_id]
-            del client_chunks[client_id]
+            # del client_buffer[client_id]
+            # del client_chunks[client_id]
 
     # start writing to buffer with buffer_lock
     async def start_recorder(recorder): 
-        async with buffer_lock:
-            await recorder.start()
+        # async with buffer_lock:
+        await recorder.start()
     
     async def read_buffer_chunks(audio_sender,client_id):
         await asyncio.sleep(10)
@@ -146,7 +146,7 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
 # end point to send audio back to the client (for now just streaming the audio back to the client)
 # endpoint: /audio?client_id=<client_id>
 @app.get("/audio")
-async def get_audio(client_id: int):
+async def get_audio(client_id: str):
     print(client_buffer)
     audio_buffer = client_buffer[client_id]
     audio_buffer.seek(0) # seek the audio buffer to the start of the audio

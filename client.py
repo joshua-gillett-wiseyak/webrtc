@@ -15,10 +15,17 @@ async def run(client_id):
 
     config = RTCConfiguration(iceServers=[RTCIceServer(urls="stun:stun.l.google.com:19302")])
     pc = RTCPeerConnection(configuration=config)
-    # print(id(pc))
+
     channel = pc.createDataChannel("chat")
 
     recorder = MediaRecorder('./receivedFromServer.wav')
+
+    # Capture audio from the audiofile and stream for now
+    # player = MediaPlayer('./audiotest.wav')
+    # audio_track = player.audio
+
+    # Add audio track to the peer connection
+    pc.addTrack(MediaPlayer("audio=Microphone Array (Realtek(R) Audio)",format="dshow").audio)
 
     @channel.on("open")
     def on_open():
@@ -45,13 +52,6 @@ async def run(client_id):
             # asyncio.ensure_future(save_audio())
             # await pc.close()
 
-    # Capture audio from the audiofile and stream for now
-    player = MediaPlayer('./audiotest.wav')
-    audio_track = player.audio
-
-    # Add audio track to the peer connection
-    pc.addTrack(audio_track)
-    
     # Audio Received from the server will be saved to a file for now
     
     await pc.setLocalDescription(await pc.createOffer())
