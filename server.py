@@ -9,6 +9,9 @@ from starlette.responses import StreamingResponse
 import numpy as np
 import wave
 import requests
+import torch
+import torchaudio
+import matplotlib.pyplot as plt
 # import logging
 
 app = FastAPI() # Initialize the FastAPI 
@@ -20,6 +23,71 @@ client_datachannels={} # {'c1': channelC1, 'c2':channelC2, ...} client - datacha
 # logging.basicConfig(level=logging.DEBUG)
 
 buffer_lock = asyncio.Lock() # buffer_lock to avoid race condition
+
+# loading model for vad
+model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
+                              model='silero_vad',
+                              force_reload=True,
+                              onnx=False)
+SAMPLE_RATE = 16000
+SILENCE_TIME = 2 # 2 seconds
+FRAMES_PER_CHUNK = 1024
+SILENCE_SAMPLES = SAMPLE_RATE * SILENCE_TIME
+
+speech_threshold = 0
+speech_audio = torch.empty(0)
+silence_audio = torch.empty(0)
+prob_data = []
+silence_found = False
+
+resample = torchaudio.transforms.Resample(orig_freq = 44100, new_freq = 16000)
+
+def VAD_from_chunk_input(chunk, threshold_weight = 0.9):
+    global speech_threshold
+    global speech_audio
+    global silence_audio
+    global prob_data
+    global silence_found
+
+    np_chunk = np.frombuffer(chunk, dtype = np.int16)
+    np_chunk = np_chunk.astype(np.float32) / 32768.0
+    print("np_chunk", type(np_chunk), np_chunk.shape)
+    chunk_audio = torch.from_numpy(np_chunk)
+    print("chunk_audio", type(chunk_audio), np_chunk.size)
+    chunk_audio = resample(chunk_audio)
+    # consider meaning into one channel here
+    print("chunk_audio resample", type(chunk_audio), np_chunk.size)
+    # if chunk_audio.shape[0] < FRAMES_PER_CHUNK:
+    #     print("Chunk small", chunk_audio.shape[0])
+    # Find prob of speech for using silero-vad
+    speech_prob = model(chunk_audio, SAMPLE_RATE).item()
+    prob_data.append(speech_prob)
+
+    if speech_prob >= speech_threshold:
+        speech_audio = torch.cat((speech_audio, chunk_audio), dim=0)
+        silence_audio = torch.empty(0)
+    else:
+        silence_audio = torch.cat((silence_audio, chunk_audio), dim=0)
+        if silence_audio.shape[0] >= SILENCE_SAMPLES:
+            if not silence_found:
+                speech_unsq = torch.unsqueeze(speech_audio, dim=0)
+                torchaudio.save("outputSpeech.wav", speech_unsq, SAMPLE_RATE)
+                print("Speech data saved at outputSpeech.wav", )
+                raise SystemExit
+            silence_found = True
+            print("found silence")
+        else:
+            speech_audio = torch.cat((speech_audio, chunk_audio), dim=0)
+    
+    # adaptive thresholding
+    # this should in theory allow for silence at the beginning of audio
+    speech_threshold = threshold_weight * max([i**2 for i in prob_data]) + (1 - threshold_weight) * min([i**2 for i in prob_data])
+
+    # pass the spoken data to LLM
+    # pass speech_audio
+
+    #for testing
+
 
 # Create a child class to MediaRecorder class to record audio data to a buffer
 class BufferMediaRecorder(MediaRecorder):
@@ -106,17 +174,20 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
         audio_sender.replaceTrack(MediaPlayer('./serverToClient.wav').audio)
 
         while True:
-            await asyncio.sleep(1)  # adjust the sleep time based on your requirements
+            await asyncio.sleep(0.1)  # adjust the sleep time based on your requirements
             async with buffer_lock:
                 audio_buffer = client_buffer[client_id]
                 audio_buffer.seek(0, io.SEEK_END)
                 size = audio_buffer.tell()
+                print("chunk size wh")
                 audio_buffer.seek(0, io.SEEK_SET)
                 chunk = audio_buffer.read(size)
                 if chunk:
                     client_chunks[client_id].append(chunk)
                 audio_buffer.seek(0)
                 audio_buffer.truncate()
+                
+                VAD_from_chunk_input(chunk)
 
                 # get the client's datachannel 
                 dc=client_datachannels[client_id]
