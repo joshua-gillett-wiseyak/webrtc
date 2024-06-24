@@ -113,7 +113,7 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
                 audio_buffer = client_buffer[client_id]
                 audio_buffer.seek(0, io.SEEK_END)
                 size = audio_buffer.tell()
-                if size>=1024:
+                if size>=CHUNK_SIZE:
                     audio_buffer.seek(0, io.SEEK_SET)
                     chunk = audio_buffer.read(CHUNK_SIZE)
 
