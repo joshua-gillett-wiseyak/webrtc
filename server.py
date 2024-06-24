@@ -21,6 +21,8 @@ client_datachannels={} # {'c1': channelC1, 'c2':channelC2, ...} client - datacha
 
 buffer_lock = asyncio.Lock() # buffer_lock to avoid race condition
 
+CHUNK_SIZE = 1024 # Size of bytes to read from buffer
+
 # Create a child class to MediaRecorder class to record audio data to a buffer
 class BufferMediaRecorder(MediaRecorder):
     """
@@ -102,25 +104,30 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
             await recorder.start()
     
     async def read_buffer_chunks(audio_sender,client_id):
-        await asyncio.sleep(10)
-        audio_sender.replaceTrack(MediaPlayer('./serverToClient.wav').audio)
+        # await asyncio.sleep(10)
+        # audio_sender.replaceTrack(MediaPlayer('./serverToClient.wav').audio)
 
         while True:
-            await asyncio.sleep(1)  # adjust the sleep time based on your requirements
+            await asyncio.sleep(0.01)  # adjust the sleep time based on your requirements
             async with buffer_lock:
                 audio_buffer = client_buffer[client_id]
                 audio_buffer.seek(0, io.SEEK_END)
                 size = audio_buffer.tell()
-                audio_buffer.seek(0, io.SEEK_SET)
-                chunk = audio_buffer.read(size)
-                if chunk:
-                    client_chunks[client_id].append(chunk)
-                audio_buffer.seek(0)
-                audio_buffer.truncate()
+                if size>=1024:
+                    audio_buffer.seek(0, io.SEEK_SET)
+                    chunk = audio_buffer.read(CHUNK_SIZE)
+
+                    # Implement VAD in this chunk
+                    # VAD()
+
+                    if chunk:
+                        client_chunks[client_id].append(chunk)
+                    audio_buffer.seek(0)
+                    audio_buffer.truncate()
 
                 # get the client's datachannel 
-                dc=client_datachannels[client_id]
-                dc.send("Iteration inside While Loop")
+                # dc=client_datachannels[client_id]
+                # dc.send("Iteration inside While Loop")
 
     # Handshake with the clients to make WebRTC Connections
     try:
@@ -193,10 +200,13 @@ async def get_audio(client_id: int):
 
 @app.get("/")
 def getClients():
+
     return {
         "clients": list(pcs),  # Convert set to list for JSON serialization
         "client_buffer": list(client_buffer.keys()),  # Get all client IDs in the buffer
-        "client_chunks": {client_id: len(chunks) for client_id, chunks in client_chunks.items()}  # Get all client chunks and their sizes
+        "client_chunks": {client_id: len(chunks) for client_id, chunks in client_chunks.items()} , # Get all client chunks and their sizes
+        "client_indi_chunk": {client_id: len(chunks[0]) for client_id, chunks in client_chunks.items()},
+        "client_sum_chunk": {client_id: sum(len(chunk) for chunk in chunks) for client_id, chunks in client_chunks.items()}
     }
 
 
