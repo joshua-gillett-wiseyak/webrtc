@@ -31,7 +31,7 @@ model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
                               onnx=False)
 SAMPLE_RATE = 16000
 SILENCE_TIME = 2 # 2 seconds
-FRAMES_PER_CHUNK = 1024
+CHUNK_SIZE = 4096
 SILENCE_SAMPLES = SAMPLE_RATE * SILENCE_TIME
 
 speech_threshold = 0
@@ -42,13 +42,22 @@ silence_found = False
 
 resample = torchaudio.transforms.Resample(orig_freq = 44100, new_freq = 16000)
 
-def VAD_from_chunk_input(chunk, threshold_weight = 0.9):
+# VAD function using Silero-VAD model, https://github.com/snakers4/silero-vad,
+# Receives chunk of audio in bytes and converts to PyTorch Tensor. If the chunk
+# has voice in it, the function adds it to a tensor 'speech_audio' and clears 
+# the tensor 'silence_audio', and if it does not, it adds it to 'silence_audio'. 
+# When 'silence_audio' is SILENCE_TIME long (2 seconds), it will pass the speech 
+# to the LLM.
+# TEMPORARY: At the moment, the function raises SystemExit exception to
+# only output the first collection of speech.
+def VAD(chunk, threshold_weight = 0.9):
     global speech_threshold
     global speech_audio
     global silence_audio
     global prob_data
     global silence_found
 
+    # convert from bytesaudio to pytorch tensor
     np_chunk = np.frombuffer(chunk, dtype = np.int16)
     np_chunk = np_chunk.astype(np.float32) / 32768.0
     print("np_chunk", type(np_chunk), np_chunk.shape)
@@ -59,7 +68,8 @@ def VAD_from_chunk_input(chunk, threshold_weight = 0.9):
     print("chunk_audio resample", type(chunk_audio), np_chunk.size)
     # if chunk_audio.shape[0] < FRAMES_PER_CHUNK:
     #     print("Chunk small", chunk_audio.shape[0])
-    # Find prob of speech for using silero-vad
+
+    # Find prob of speech for using silero-vad model
     speech_prob = model(chunk_audio, SAMPLE_RATE).item()
     prob_data.append(speech_prob)
 
@@ -71,8 +81,12 @@ def VAD_from_chunk_input(chunk, threshold_weight = 0.9):
         if silence_audio.shape[0] >= SILENCE_SAMPLES:
             if not silence_found:
                 speech_unsq = torch.unsqueeze(speech_audio, dim=0)
+                # speech_unsq = (speech_unsq * 32768.0).short()
                 torchaudio.save("outputSpeech.wav", speech_unsq, SAMPLE_RATE)
                 print("Speech data saved at outputSpeech.wav", )
+                # pass the spoken data 'speech_audio' to LLM here
+
+                # TEMPORARY
                 raise SystemExit
             silence_found = True
             print("found silence")
@@ -83,10 +97,7 @@ def VAD_from_chunk_input(chunk, threshold_weight = 0.9):
     # this should in theory allow for silence at the beginning of audio
     speech_threshold = threshold_weight * max([i**2 for i in prob_data]) + (1 - threshold_weight) * min([i**2 for i in prob_data])
 
-    # pass the spoken data to LLM
-    # pass speech_audio
 
-    #for testing
 
 
 # Create a child class to MediaRecorder class to record audio data to a buffer
@@ -170,28 +181,30 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
             await recorder.start()
     
     async def read_buffer_chunks(audio_sender,client_id):
-        await asyncio.sleep(10)
-        audio_sender.replaceTrack(MediaPlayer('./serverToClient.wav').audio)
+        # await asyncio.sleep(10)
+        # audio_sender.replaceTrack(MediaPlayer('./serverToClient.wav').audio)
 
         while True:
-            await asyncio.sleep(0.1)  # adjust the sleep time based on your requirements
+            await asyncio.sleep(0.01)  # adjust the sleep time based on your requirements
             async with buffer_lock:
                 audio_buffer = client_buffer[client_id]
                 audio_buffer.seek(0, io.SEEK_END)
                 size = audio_buffer.tell()
-                print("chunk size wh")
-                audio_buffer.seek(0, io.SEEK_SET)
-                chunk = audio_buffer.read(size)
-                if chunk:
-                    client_chunks[client_id].append(chunk)
-                audio_buffer.seek(0)
-                audio_buffer.truncate()
-                
-                VAD_from_chunk_input(chunk)
+                if size>=CHUNK_SIZE:
+                    audio_buffer.seek(0, io.SEEK_SET)
+                    chunk = audio_buffer.read(CHUNK_SIZE)
+
+                    # Implement VAD in this chunk
+                    VAD(chunk)
+
+                    if chunk:
+                        client_chunks[client_id].append(chunk)
+                    audio_buffer.seek(0)
+                    audio_buffer.truncate()
 
                 # get the client's datachannel 
-                dc=client_datachannels[client_id]
-                dc.send("Iteration inside While Loop")
+                # dc=client_datachannels[client_id]
+                # dc.send("Iteration inside While Loop")
 
     # Handshake with the clients to make WebRTC Connections
     try:
