@@ -31,7 +31,10 @@ model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
                               onnx=False)
 SAMPLE_RATE = 16000
 SILENCE_TIME = 2 # 2 seconds
-CHUNK_SIZE = 4096
+CHUNK_SAMPLES = 2048
+CHANNELS = 2
+BIT_DEPTH = 2
+CHUNK_SIZE = CHUNK_SAMPLES * CHANNELS * BIT_DEPTH # amt of bytes per chunk
 SILENCE_SAMPLES = SAMPLE_RATE * SILENCE_TIME
 
 speech_threshold = 0
@@ -48,8 +51,8 @@ resample = torchaudio.transforms.Resample(orig_freq = 44100, new_freq = 16000)
 # the tensor 'silence_audio', and if it does not, it adds it to 'silence_audio'. 
 # When 'silence_audio' is SILENCE_TIME long (2 seconds), it will pass the speech 
 # to the LLM.
-# TEMPORARY: At the moment, the function raises SystemExit exception to
-# only output the first collection of speech.
+# TEMPORARY: At the moment, the function raises SystemExit to only output the 
+# first collection of speech.
 def VAD(chunk, threshold_weight = 0.9):
     global speech_threshold
     global speech_audio
@@ -57,17 +60,17 @@ def VAD(chunk, threshold_weight = 0.9):
     global prob_data
     global silence_found
 
-    # convert from bytesaudio to pytorch tensor
+    # Convert from bytesaudio to pytorch tensor
     np_chunk = np.frombuffer(chunk, dtype = np.int16)
     np_chunk = np_chunk.astype(np.float32) / 32768.0
     print("np_chunk", type(np_chunk), np_chunk.shape)
+    # Mean CHANNELS into mono
+    np_chunk = np_chunk.reshape(-1, CHANNELS).mean(axis = 1)
+    print("np_chunk mono", type(np_chunk), np_chunk.shape)
     chunk_audio = torch.from_numpy(np_chunk)
     print("chunk_audio", type(chunk_audio), np_chunk.size)
     chunk_audio = resample(chunk_audio)
-    # consider meaning into one channel here
     print("chunk_audio resample", type(chunk_audio), np_chunk.size)
-    # if chunk_audio.shape[0] < FRAMES_PER_CHUNK:
-    #     print("Chunk small", chunk_audio.shape[0])
 
     # Find prob of speech for using silero-vad model
     speech_prob = model(chunk_audio, SAMPLE_RATE).item()
@@ -78,6 +81,7 @@ def VAD(chunk, threshold_weight = 0.9):
         silence_audio = torch.empty(0)
     else:
         silence_audio = torch.cat((silence_audio, chunk_audio), dim=0)
+        speech_audio = torch.cat((speech_audio, chunk_audio), dim=0)
         if silence_audio.shape[0] >= SILENCE_SAMPLES:
             if not silence_found:
                 speech_unsq = torch.unsqueeze(speech_audio, dim=0)
@@ -90,8 +94,6 @@ def VAD(chunk, threshold_weight = 0.9):
                 raise SystemExit
             silence_found = True
             print("found silence")
-        else:
-            speech_audio = torch.cat((speech_audio, chunk_audio), dim=0)
     
     # adaptive thresholding
     # this should in theory allow for silence at the beginning of audio
