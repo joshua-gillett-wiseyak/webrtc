@@ -22,7 +22,8 @@ client_buffer={} # {'c1':'io.BytesIO()', 'c2':'io.BytesIO()', ...} client buffer
 client_chunks={} # {'c1':[], 'c2':[], ...} client - list mapping dictionary to read from the buffer and check if audio is available in the chunks
 client_datachannels={} # {'c1': channelC1, 'c2':channelC2, ...} client - datachannels mapping dictionary to make channel accessible outside of the event handler
 # logging.basicConfig(level=logging.DEBUG)
-
+client_audio = {} # {'c1':[[]], 'c2': [[]], ...} client - np.array mapping dictionary for all of client's audio as one np.array, popped when VAD detects silence
+client_speech = {} # {'c1':[[]], 'c2': [[]], ...} client - np.array mapping dictionary for output speech from VAD
 buffer_lock = asyncio.Lock() # buffer_lock to avoid race condition
 
 # loading model for vad
@@ -51,10 +52,8 @@ resample = torchaudio.transforms.Resample(orig_freq = 44100, new_freq = 16000)
 # has voice in it, the function adds it to a tensor 'speech_audio' and clears 
 # the tensor 'silence_audio', and if it does not, it adds it to 'silence_audio'. 
 # When 'silence_audio' is SILENCE_TIME long (2 seconds), it will pass the speech 
-# to the LLM.
-# TEMPORARY: At the moment, the function raises SystemExit to only output the 
-# first collection of speech.
-def VAD(audio_sender, chunk, threshold_weight = 0.9):
+# to 'client_speech', and pop from 'client_audio'.
+def VAD(chunk, client_id, threshold_weight = 0.9):
     global speech_threshold
     global speech_audio
     global silence_audio
@@ -71,9 +70,13 @@ def VAD(audio_sender, chunk, threshold_weight = 0.9):
     np_chunk = np_chunk.reshape(-1, CHANNELS).mean(axis = 1)
     print("np_chunk mono", type(np_chunk), np_chunk.shape)
     chunk_audio = torch.from_numpy(np_chunk)
-    print("chunk_audio", type(chunk_audio), np_chunk.size)
+    print("chunk_audio", type(chunk_audio))
     chunk_audio = resample(chunk_audio)
-    print("chunk_audio resample", type(chunk_audio), np_chunk.size)
+    print("chunk_audio resample", type(chunk_audio))
+
+    # Send to speech buffer
+    client_audio[client_id] = np.append(client_audio[client_id], chunk_audio.numpy())
+    print("client_audio np", client_audio[client_id].shape)
 
     # Find prob of speech for using silero-vad model
     speech_prob = model(chunk_audio, SAMPLE_RATE).item()
@@ -86,24 +89,19 @@ def VAD(audio_sender, chunk, threshold_weight = 0.9):
         silence_audio = torch.cat((silence_audio, chunk_audio), dim=0)
         speech_audio = torch.cat((speech_audio, chunk_audio), dim=0)
         if silence_audio.shape[0] >= SILENCE_SAMPLES:
-            if not silence_found:
-                speech_unsq = torch.unsqueeze(speech_audio, dim=0)
-                torchaudio.save("outputSpeech.wav", speech_unsq, SAMPLE_RATE)
-                print("Speech data saved at outputSpeech.wav", )
-                temp_audio = tempfile.NamedTemporaryFile(delete = True)
-                shutil.copy2("outputSpeech.wav", temp_audio.name)
-                audio_sender.replaceTrack(MediaPlayer(temp_audio.name).audio)
-                silence_found = True
-                return
-                # pass the spoken data 'speech_audio' to LLM here
-
-                # TEMPORARY
-                raise SystemExit
-            else:
-                return
+            # TEMPORARY: saving the speech into outputSpeech.wav
+            speech_unsq = torch.unsqueeze(speech_audio, dim=0)
+            torchaudio.save("outputSpeech.wav", speech_unsq, SAMPLE_RATE)
+            print("Speech data saved at outputSpeech.wav", )
+            # pop from client_audio and save into client_speech
+            print("client_audio", client_audio, "client_id", client_audio[client_id].shape)
+            speech = client_audio[client_id]
+            client_audio[client_id] = np.empty(0)
+            print("client_audio", client_audio, "client_id", client_audio[client_id].shape)
+            client_speech[client_id] = speech
     
-    # adaptive thresholding
-    # this should in theory allow for silence at the beginning of audio
+    # Adaptive thresholding
+    # This should in theory allow for silence at the beginning of audio
     speech_threshold = threshold_weight * max([i**2 for i in prob_data]) + (1 - threshold_weight) * min([i**2 for i in prob_data])
 
 
@@ -134,6 +132,8 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
     audio_buffer = io.BytesIO()
     client_buffer[client_id]=audio_buffer
     client_chunks[client_id]=[]
+    client_audio[client_id]=np.empty(0)
+    client_speech[client_id]=np.empty(0)
 
     # By default, records the received audio to a file
     # example: recorder = MediaRecorder('received_audio.wav')
@@ -204,7 +204,12 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
                     chunk = audio_buffer.read(CHUNK_SIZE)
 
                     # Implement VAD in this chunk
-                    VAD(audio_sender, chunk)
+                    VAD(chunk, client_id)
+                    
+                    # TEMPORARY: testing purposes to see that client_speech is saved with the spoken data
+                    if client_speech[client_id].size != 0:
+                        print("VAD detected speech, LLM would read", client_speech[client_id], client_speech[client_id].shape)
+                        raise SystemExit
 
                     if chunk:
                         client_chunks[client_id].append(chunk)
