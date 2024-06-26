@@ -11,7 +11,8 @@ import wave
 import requests
 import torch
 import torchaudio
-import matplotlib.pyplot as plt
+import shutil
+import tempfile
 # import logging
 
 app = FastAPI() # Initialize the FastAPI 
@@ -53,13 +54,15 @@ resample = torchaudio.transforms.Resample(orig_freq = 44100, new_freq = 16000)
 # to the LLM.
 # TEMPORARY: At the moment, the function raises SystemExit to only output the 
 # first collection of speech.
-def VAD(chunk, threshold_weight = 0.9):
+def VAD(audio_sender, chunk, threshold_weight = 0.9):
     global speech_threshold
     global speech_audio
     global silence_audio
     global prob_data
     global silence_found
 
+    if silence_found:
+        return
     # Convert from bytesaudio to pytorch tensor
     np_chunk = np.frombuffer(chunk, dtype = np.int16)
     np_chunk = np_chunk.astype(np.float32) / 32768.0
@@ -85,15 +88,19 @@ def VAD(chunk, threshold_weight = 0.9):
         if silence_audio.shape[0] >= SILENCE_SAMPLES:
             if not silence_found:
                 speech_unsq = torch.unsqueeze(speech_audio, dim=0)
-                # speech_unsq = (speech_unsq * 32768.0).short()
                 torchaudio.save("outputSpeech.wav", speech_unsq, SAMPLE_RATE)
                 print("Speech data saved at outputSpeech.wav", )
+                temp_audio = tempfile.NamedTemporaryFile(delete = True)
+                shutil.copy2("outputSpeech.wav", temp_audio.name)
+                audio_sender.replaceTrack(MediaPlayer(temp_audio.name).audio)
+                silence_found = True
+                return
                 # pass the spoken data 'speech_audio' to LLM here
 
                 # TEMPORARY
                 raise SystemExit
-            silence_found = True
-            print("found silence")
+            else:
+                return
     
     # adaptive thresholding
     # this should in theory allow for silence at the beginning of audio
@@ -197,7 +204,7 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
                     chunk = audio_buffer.read(CHUNK_SIZE)
 
                     # Implement VAD in this chunk
-                    VAD(chunk)
+                    VAD(audio_sender, chunk)
 
                     if chunk:
                         client_chunks[client_id].append(chunk)
