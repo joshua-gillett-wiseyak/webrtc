@@ -82,6 +82,7 @@ def VAD(chunk, client_id, threshold_weight = 0.9):
 
     # Find prob of speech for using silero-vad model
     speech_prob = model(chunk_audio, SAMPLE_RATE).item()
+    prob_data.append(speech_prob)
 
     if speech_prob >= speech_threshold:
         # Add chunk to the speech tensor and clear the silence tensor
