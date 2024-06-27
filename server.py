@@ -24,6 +24,11 @@ client_datachannels={} # {'c1': channelC1, 'c2':channelC2, ...} client - datacha
 # logging.basicConfig(level=logging.DEBUG)
 client_audio = {} # {'c1':[[]], 'c2': [[]], ...} client - np.array mapping dictionary for all of client's audio as one np.array, popped when VAD detects silence
 client_speech = {} # {'c1':[[]], 'c2': [[]], ...} client - np.array mapping dictionary for output speech from VAD
+
+client_info = {} # {'c1' : {'speech_tensor':'torch.tensor', 'silence_tensor':'torch.tensor', 'speech_threshold':float 'prob_data': []}} 
+# client - dictionary mappign dictionary that stores data for the VAD logic, such as the PyTorch tensors for speech and silence, the adaptive thresholding value,
+# and the list of the probabilities for use in the adaptive thresholding logic
+
 buffer_lock = asyncio.Lock() # buffer_lock to avoid race condition
 
 # loading model for vad
@@ -31,6 +36,9 @@ model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
                               model='silero_vad',
                               force_reload=True,
                               onnx=False)
+
+# Global constants related to the audio input format and chosen chunk values.
+# Edit as appropriate for the input stream.
 SAMPLE_RATE = 16000
 SILENCE_TIME = 2 # 2 seconds
 CHUNK_SAMPLES = 2048
@@ -38,12 +46,6 @@ CHANNELS = 2
 BIT_DEPTH = 2
 CHUNK_SIZE = CHUNK_SAMPLES * CHANNELS * BIT_DEPTH # amt of bytes per chunk
 SILENCE_SAMPLES = SAMPLE_RATE * SILENCE_TIME
-
-speech_threshold = 0
-speech_audio = torch.empty(0)
-silence_audio = torch.empty(0)
-prob_data = []
-silence_found = False
 
 resample = torchaudio.transforms.Resample(orig_freq = 44100, new_freq = 16000)
 
@@ -54,55 +56,62 @@ resample = torchaudio.transforms.Resample(orig_freq = 44100, new_freq = 16000)
 # When 'silence_audio' is SILENCE_TIME long (2 seconds), it will pass the speech 
 # to 'client_speech', and pop from 'client_audio'.
 def VAD(chunk, client_id, threshold_weight = 0.9):
-    global speech_threshold
-    global speech_audio
-    global silence_audio
-    global prob_data
-    global silence_found
+    # Pull information from client_info dictionary and save the
+    # appropriate values for use in VAD, editing as needed within
+    # VAD function.
+    info = client_info[client_id]
+    speech_threshold = info['speech_threshold']
+    speech_audio = info['speech_audio']
+    silence_audio = info['silence_audio']
+    prob_data = info['prob_data']
 
-    if silence_found:
-        return
-    # Convert from bytesaudio to pytorch tensor
+    # To convert from BytesAudio to PyTorch tensor, first convert
+    # from BytesAudio to np_chunk and normalize to [-1,1] range.
+    # Then mean from the number of CHANNELS of audio to single
+    # channel audio, convert to PyTorch tensor, and resample from
+    # 44100 Hz to 16000 Hz audio
     np_chunk = np.frombuffer(chunk, dtype = np.int16)
     np_chunk = np_chunk.astype(np.float32) / 32768.0
-    print("np_chunk", type(np_chunk), np_chunk.shape)
-    # Mean CHANNELS into mono
     np_chunk = np_chunk.reshape(-1, CHANNELS).mean(axis = 1)
-    print("np_chunk mono", type(np_chunk), np_chunk.shape)
     chunk_audio = torch.from_numpy(np_chunk)
-    print("chunk_audio", type(chunk_audio))
     chunk_audio = resample(chunk_audio)
-    print("chunk_audio resample", type(chunk_audio))
 
-    # Send to speech buffer
+    # Save all chunks to client_audio, collecting for VAD later
+    # or allowing audio_sender to see interruptions.
     client_audio[client_id] = np.append(client_audio[client_id], chunk_audio.numpy())
-    print("client_audio np", client_audio[client_id].shape)
 
     # Find prob of speech for using silero-vad model
     speech_prob = model(chunk_audio, SAMPLE_RATE).item()
-    prob_data.append(speech_prob)
 
     if speech_prob >= speech_threshold:
+        # Add chunk to the speech tensor and clear the silence tensor
         speech_audio = torch.cat((speech_audio, chunk_audio), dim=0)
         silence_audio = torch.empty(0)
     else:
+        # Add chunk to both silence tensor and speech tensor
         silence_audio = torch.cat((silence_audio, chunk_audio), dim=0)
         speech_audio = torch.cat((speech_audio, chunk_audio), dim=0)
+        # If the silence is longer than the SILENCE_TIME (2 sec)
+        # pop client_audio and save to client_speech, which LLM
+        # will use
         if silence_audio.shape[0] >= SILENCE_SAMPLES:
             # TEMPORARY: saving the speech into outputSpeech.wav
             speech_unsq = torch.unsqueeze(speech_audio, dim=0)
             torchaudio.save("outputSpeech.wav", speech_unsq, SAMPLE_RATE)
             print("Speech data saved at outputSpeech.wav", )
             # pop from client_audio and save into client_speech
-            print("client_audio", client_audio, "client_id", client_audio[client_id].shape)
             speech = client_audio[client_id]
             client_audio[client_id] = np.empty(0)
-            print("client_audio", client_audio, "client_id", client_audio[client_id].shape)
             client_speech[client_id] = speech
     
-    # Adaptive thresholding
-    # This should in theory allow for silence at the beginning of audio
+    # Adaptive thresholding which should allow for silence at the beginning
+    # of audio and adapt to differing confidence levels of the VAD model.
+    # Equation acquired from link:
+    # https://vocal.com/voice-quality-enhancement/voice-activity-detection-with-adaptive-thresholding/
     speech_threshold = threshold_weight * max([i**2 for i in prob_data]) + (1 - threshold_weight) * min([i**2 for i in prob_data])
+
+    # Save data back into client_info with updated values
+    client_info[client_id] = {'speech_audio':speech_audio, 'silence_audio':silence_audio, 'speech_threshold':speech_threshold, 'prob_data': prob_data}
 
 
 
@@ -134,6 +143,7 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
     client_chunks[client_id]=[]
     client_audio[client_id]=np.empty(0)
     client_speech[client_id]=np.empty(0)
+    client_info[client_id]={'speech_audio':torch.empty(0), 'silence_audio': torch.empty(0), 'speech_threshold':0.0, 'prob_data':[]}
 
     # By default, records the received audio to a file
     # example: recorder = MediaRecorder('received_audio.wav')
@@ -219,6 +229,18 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
                 # get the client's datachannel 
                 # dc=client_datachannels[client_id]
                 # dc.send("Iteration inside While Loop")
+
+    async def audio_send(client_id):
+        INTERRUPT_THRESHOLD = 0.8
+        np_interrupt = client_audio[client_id]
+        interrupt_audio = torch.from_numpy(np_interrupt)
+        interrupt_prob = model(interrupt_audio, SAMPLE_RATE).item()
+        if interrupt_prob >= INTERRUPT_THRESHOLD:
+            pass
+            # stop streaming audio to client
+        else:
+            pass
+            # continue streaming audio to client
 
     # Handshake with the clients to make WebRTC Connections
     try:
