@@ -40,14 +40,15 @@ model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
 # Global constants related to the audio input format and chosen chunk values.
 # Edit as appropriate for the input stream.
 SAMPLE_RATE = 16000
+ORIG_SAMPLE = 48000
 SILENCE_TIME = 2 # 2 seconds
-CHUNK_SAMPLES = 2048
+CHUNK_SAMPLES = 512
 CHANNELS = 2
 BIT_DEPTH = 2
-CHUNK_SIZE = CHUNK_SAMPLES * CHANNELS * BIT_DEPTH # amt of bytes per chunk
+CHUNK_SIZE = int(CHUNK_SAMPLES * CHANNELS * BIT_DEPTH * (ORIG_SAMPLE/ SAMPLE_RATE)) # amt of bytes per chunk
 SILENCE_SAMPLES = SAMPLE_RATE * SILENCE_TIME
 
-resample = torchaudio.transforms.Resample(orig_freq = 44100, new_freq = 16000)
+resample = torchaudio.transforms.Resample(orig_freq = ORIG_SAMPLE, new_freq = SAMPLE_RATE)
 
 # VAD function using Silero-VAD model, https://github.com/snakers4/silero-vad,
 # Receives chunk of audio in bytes and converts to PyTorch Tensor. If the chunk
@@ -73,6 +74,7 @@ def VAD(chunk, client_id, threshold_weight = 0.9):
     np_chunk = np.frombuffer(chunk, dtype = np.int16)
     np_chunk = np_chunk.astype(np.float32) / 32768.0
     np_chunk = np_chunk.reshape(-1, CHANNELS).mean(axis = 1)
+    print("np_chunk", np_chunk.shape[0])
     chunk_audio = torch.from_numpy(np_chunk)
     chunk_audio = resample(chunk_audio)
 
@@ -231,6 +233,8 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
                 # dc=client_datachannels[client_id]
                 # dc.send("Iteration inside While Loop")
 
+    # audio-sender coroutine
+    # TO-DO: sending the audio the client, currently just has interruption logic
     async def audio_send(client_id):
         INTERRUPT_THRESHOLD = 0.8
         np_interrupt = client_audio[client_id]
@@ -323,4 +327,4 @@ def getClients():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="localhost", port=8000) # Increase the number of workers as needed and limit_max_requests
+    uvicorn.run(app, host="localhost", port=8080) # Increase the number of workers as needed and limit_max_requests
