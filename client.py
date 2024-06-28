@@ -35,7 +35,7 @@ async def run(client_id):
         print(f"Track{track.kind} received. Make sure .start() is called to start recording")
 
         if track.kind == "audio":
-            recorder.addTrack(track)
+            recorder.add(track)
             await recorder.start()
             
         @track.on("ended")

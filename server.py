@@ -25,7 +25,7 @@ client_datachannels={} # {'c1': channelC1, 'c2':channelC2, ...} client - datacha
 client_audio = {} # {'c1':[[]], 'c2': [[]], ...} client - np.array mapping dictionary for all of client's audio as one np.array, popped when VAD detects silence
 client_speech = {} # {'c1':[[]], 'c2': [[]], ...} client - np.array mapping dictionary for output speech from VAD
 
-client_info = {} # {'c1' : {'speech_tensor':'torch.tensor', 'silence_tensor':'torch.tensor', 'speech_threshold':float 'prob_data': []}} 
+client_info = {} # {'c1' : {'speech_tensor':'torch.tensor', 'silence_tensor':'torch.tensor', 'speech_threshold':float 'prob_data': [], 'silence_found':bool}} 
 # client - dictionary mappign dictionary that stores data for the VAD logic, such as the PyTorch tensors for speech and silence, the adaptive thresholding value,
 # and the list of the probabilities for use in the adaptive thresholding logic
 
@@ -65,6 +65,7 @@ async def VAD(chunk, client_id, threshold_weight = 0.9):
     speech_audio = info['speech_audio']
     silence_audio = info['silence_audio']
     prob_data = info['prob_data']
+    silence_found = info['silence_found']
 
     # To convert from BytesAudio to PyTorch tensor, first convert
     # from BytesAudio to np_chunk and normalize to [-1,1] range.
@@ -74,7 +75,6 @@ async def VAD(chunk, client_id, threshold_weight = 0.9):
     np_chunk = np.frombuffer(chunk, dtype = np.int16)
     np_chunk = np_chunk.astype(np.float32) / 32768.0
     np_chunk = np_chunk.reshape(-1, CHANNELS).mean(axis = 1)
-    print("np_chunk", np_chunk.shape[0])
     chunk_audio = torch.from_numpy(np_chunk)
     chunk_audio = resample(chunk_audio)
 
@@ -98,6 +98,8 @@ async def VAD(chunk, client_id, threshold_weight = 0.9):
         # pop client_audio and save to client_speech, which LLM
         # will use
         if silence_audio.shape[0] >= SILENCE_SAMPLES:
+            print("Silence of 2s detected")
+            silence_found = True
             # TEMPORARY: saving the speech into outputSpeech.wav
             speech_unsq = torch.unsqueeze(speech_audio, dim=0)
             torchaudio.save("outputSpeech.wav", speech_unsq, SAMPLE_RATE)
@@ -122,7 +124,7 @@ async def VAD(chunk, client_id, threshold_weight = 0.9):
     speech_threshold = threshold_weight * max([i**2 for i in prob_data]) + (1 - threshold_weight) * min([i**2 for i in prob_data])
 
     # Save data back into client_info with updated values
-    client_info[client_id] = {'speech_audio':speech_audio, 'silence_audio':silence_audio, 'speech_threshold':speech_threshold, 'prob_data': prob_data}
+    client_info[client_id] = {'speech_audio':speech_audio, 'silence_audio':silence_audio, 'speech_threshold':speech_threshold, 'prob_data': prob_data, 'silence_found':silence_found}
 
 
 # Create a child class to MediaRecorder class to record audio data to a buffer
@@ -152,7 +154,7 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
     client_chunks[client_id]=[]
     client_audio[client_id]=np.empty(0)
     client_speech[client_id]=np.empty(0)
-    client_info[client_id]={'speech_audio':torch.empty(0), 'silence_audio': torch.empty(0), 'speech_threshold':0.0, 'prob_data':[]}
+    client_info[client_id]={'speech_audio':torch.empty(0), 'silence_audio': torch.empty(0), 'speech_threshold':0.0, 'prob_data':[], 'silence_found':False}
 
     # By default, records the received audio to a file
     # example: recorder = MediaRecorder('received_audio.wav')
@@ -220,10 +222,11 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
                     chunk = audio_buffer.read(CHUNK_SIZE)
 
                     # Implement VAD in this chunk
-                    asyncio.ensure_future(VAD(chunk, client_id))
+                    if not client_info[client_id]['silence_found']:
+                        asyncio.ensure_future(VAD(chunk, client_id))
                     
                     # TEMPORARY: testing purposes to see that client_speech is saved with the spoken data
-                    if client_speech[client_id].size != 0:
+                    if client_info[client_id]['silence_found'] and client_speech[client_id].size:
                         # print(type(client_speech[client_id])
                         # print("VAD detected speech, LLM would read", client_speech[client_id], client_speech[client_id].shape)
                         print('popped')
@@ -231,7 +234,8 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
                         audio_sender.replaceTrack(MediaPlayer('./outputSpeech.wav').audio)
                         # audio_sender.replaceTrack(MediaPlayer("./serverToClient.wav").audio)
                         # Start coroutine to send audio back to client
-                        # asyncio.ensure_future(send_audio_back(client_id))
+
+                        asyncio.ensure_future(send_audio_back(audio_sender, client_id))
 
                         # raise SystemExit
 
@@ -247,21 +251,32 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
     # Co-routine that runs just after first pop of the speech segments 
     # Checks if client_audio[client]  has no speech segments --> pc.replaceTrack(MediaPlayer(<path to speech saved as temppath>).audio)
     # Check if client_audio[client]  has speech segments --> pc.replaceTrack(AudioStreamTrack()).audio)
-    # async def send_audio_back(client_id):
-    #     INTERRUPT_THRESHOLD = 0.8
+    async def send_audio_back(audio_sender, client_id):
+        # Change interrupt threshold appropriately, likely lower than this, but should be tested
+        INTERRUPT_THRESHOLD = 0.8
 
-    #     np_interrupt = client_audio[client_id]     
-    #     if np_interrupt.shape[0]>=480:   
-    #         interrupt_audio = torch.from_numpy(np_interrupt).float()
-    #         interrupt_prob = model(interrupt_audio, SAMPLE_RATE).item()
-    #         if interrupt_prob >= INTERRUPT_THRESHOLD:
-    #             # pass
-    #             print('streaming silence to client')
-    #             pc.replaceTrack(MediaPlayer(AudioStreamTrack()).audio)
-                # change track to silence
-            # else:
-            #     # pass
-            #     print('continue streaming audio to client')
+        print("sending audio back with length (samples)", client_speech[client_id].shape[0])
+
+        # here is where we need to send client_speech to client
+
+        # this is for incoming audio after the silence is found, it progressively checks client_audio for interrupts
+        while(client_audio[client_id].shape[0]):
+            np_interrupt = client_audio[client_id][:CHUNK_SAMPLES]
+            print("np_interrupt size", np_interrupt.shape[0])     
+            if np_interrupt.shape[0]>=CHUNK_SAMPLES:   
+                interrupt_audio = torch.from_numpy(np_interrupt).float()
+                interrupt_prob = model(interrupt_audio, SAMPLE_RATE).item()
+                if interrupt_prob >= INTERRUPT_THRESHOLD:
+                    # pass
+                    print('streaming silence to client')
+                    audio_sender.replaceTrack(MediaPlayer(AudioStreamTrack()).audio)
+                    client_info[client_id]['silence_found'] = False
+                    break
+                    # change track to silence
+                else:
+                    # pass and remove the first chunk from the buffer for the client
+                    client_audio[client_id] = client_audio[client_id][CHUNK_SAMPLES:]
+                    print('continue streaming audio to client')
 
 
 
