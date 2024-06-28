@@ -56,7 +56,7 @@ resample = torchaudio.transforms.Resample(orig_freq = ORIG_SAMPLE, new_freq = SA
 # the tensor 'silence_audio', and if it does not, it adds it to 'silence_audio'. 
 # When 'silence_audio' is SILENCE_TIME long (2 seconds), it will pass the speech 
 # to 'client_speech', and pop from 'client_audio'.
-def VAD(chunk, client_id, threshold_weight = 0.9):
+async def VAD(chunk, client_id, threshold_weight = 0.9):
     # Pull information from client_info dictionary and save the
     # appropriate values for use in VAD, editing as needed within
     # VAD function.
@@ -102,6 +102,14 @@ def VAD(chunk, client_id, threshold_weight = 0.9):
             speech_unsq = torch.unsqueeze(speech_audio, dim=0)
             torchaudio.save("outputSpeech.wav", speech_unsq, SAMPLE_RATE)
             print("Speech data saved at outputSpeech.wav", )
+
+            # Save the speech into a temporary file
+            # with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_wav:
+            #     speech_unsq = torch.unsqueeze(speech_audio, dim=0)
+            #     torchaudio.save(temp_wav.name, speech_unsq, SAMPLE_RATE)
+            #     temp_path = temp_wav.name
+            #     print(f"Speech data saved at {temp_path}")
+
             # pop from client_audio and save into client_speech
             speech = client_audio[client_id]
             client_audio[client_id] = np.empty(0)
@@ -115,8 +123,6 @@ def VAD(chunk, client_id, threshold_weight = 0.9):
 
     # Save data back into client_info with updated values
     client_info[client_id] = {'speech_audio':speech_audio, 'silence_audio':silence_audio, 'speech_threshold':speech_threshold, 'prob_data': prob_data}
-
-
 
 
 # Create a child class to MediaRecorder class to record audio data to a buffer
@@ -203,9 +209,6 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
             await recorder.start()
     
     async def read_buffer_chunks(audio_sender,client_id):
-        # await asyncio.sleep(10)
-        # audio_sender.replaceTrack(MediaPlayer('./serverToClient.wav').audio)
-
         while True:
             await asyncio.sleep(0.01)  # adjust the sleep time based on your requirements
             async with buffer_lock:
@@ -217,12 +220,20 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
                     chunk = audio_buffer.read(CHUNK_SIZE)
 
                     # Implement VAD in this chunk
-                    VAD(chunk, client_id)
+                    asyncio.ensure_future(VAD(chunk, client_id))
                     
                     # TEMPORARY: testing purposes to see that client_speech is saved with the spoken data
                     if client_speech[client_id].size != 0:
-                        print("VAD detected speech, LLM would read", client_speech[client_id], client_speech[client_id].shape)
-                        raise SystemExit
+                        # print(type(client_speech[client_id])
+                        # print("VAD detected speech, LLM would read", client_speech[client_id], client_speech[client_id].shape)
+                        print('popped')
+                        await asyncio.sleep(5)
+                        audio_sender.replaceTrack(MediaPlayer('./outputSpeech.wav').audio)
+                        # audio_sender.replaceTrack(MediaPlayer("./serverToClient.wav").audio)
+                        # Start coroutine to send audio back to client
+                        # asyncio.ensure_future(send_audio_back(client_id))
+
+                        # raise SystemExit
 
                     if chunk:
                         client_chunks[client_id].append(chunk)
@@ -233,19 +244,27 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
                 # dc=client_datachannels[client_id]
                 # dc.send("Iteration inside While Loop")
 
-    # audio-sender coroutine
-    # TO-DO: sending the audio the client, currently just has interruption logic
-    async def audio_send(client_id):
-        INTERRUPT_THRESHOLD = 0.8
-        np_interrupt = client_audio[client_id]
-        interrupt_audio = torch.from_numpy(np_interrupt)
-        interrupt_prob = model(interrupt_audio, SAMPLE_RATE).item()
-        if interrupt_prob >= INTERRUPT_THRESHOLD:
-            pass
-            # stop streaming audio to client
-        else:
-            pass
-            # continue streaming audio to client
+    # Co-routine that runs just after first pop of the speech segments 
+    # Checks if client_audio[client]  has no speech segments --> pc.replaceTrack(MediaPlayer(<path to speech saved as temppath>).audio)
+    # Check if client_audio[client]  has speech segments --> pc.replaceTrack(AudioStreamTrack()).audio)
+    # async def send_audio_back(client_id):
+    #     INTERRUPT_THRESHOLD = 0.8
+
+    #     np_interrupt = client_audio[client_id]     
+    #     if np_interrupt.shape[0]>=480:   
+    #         interrupt_audio = torch.from_numpy(np_interrupt).float()
+    #         interrupt_prob = model(interrupt_audio, SAMPLE_RATE).item()
+    #         if interrupt_prob >= INTERRUPT_THRESHOLD:
+    #             # pass
+    #             print('streaming silence to client')
+    #             pc.replaceTrack(MediaPlayer(AudioStreamTrack()).audio)
+                # change track to silence
+            # else:
+            #     # pass
+            #     print('continue streaming audio to client')
+
+
+
 
     # Handshake with the clients to make WebRTC Connections
     try:
@@ -318,10 +337,13 @@ async def get_audio(client_id: int):
 
 @app.get("/")
 def getClients():
+
     return {
         "clients": list(pcs),  # Convert set to list for JSON serialization
         "client_buffer": list(client_buffer.keys()),  # Get all client IDs in the buffer
-        "client_chunks": {client_id: len(chunks) for client_id, chunks in client_chunks.items()}  # Get all client chunks and their sizes
+        "client_chunks": {client_id: len(chunks) for client_id, chunks in client_chunks.items()} , # Get all client chunks and their sizes
+        "client_indi_chunk": {client_id: len(chunks[0]) for client_id, chunks in client_chunks.items()},
+        "client_sum_chunk": {client_id: sum(len(chunk) for chunk in chunks) for client_id, chunks in client_chunks.items()}
     }
 
 
