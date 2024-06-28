@@ -70,8 +70,8 @@ async def run(client_id):
             answer_desc = RTCSessionDescription(sdp=answer["sdp"], type=answer["type"])
             await pc.setRemoteDescription(answer_desc)
             while True:
-                print('We are ready to send any data to the server')
-                await asyncio.sleep(5)
+                # print('We are ready to send any data to the server')
+                await asyncio.sleep(0.01)
                 # print(sdp_offer)
                 
         else:
