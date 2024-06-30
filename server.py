@@ -102,8 +102,8 @@ async def VAD(chunk, client_id, threshold_weight = 0.9):
             silence_found=True
             # TEMPORARY: saving the speech into outputSpeech.wav
             speech_unsq = torch.unsqueeze(speech_audio, dim=0)
-            torchaudio.save(client_id+"_outputSpeech.wav", speech_unsq, SAMPLE_RATE)
-            print(f"Speech data saved at {client_id}_outputSpeech.wav")
+            torchaudio.save("outputSpeech_"+client_id+".wav", speech_unsq, SAMPLE_RATE)
+            print(f"Speech data saved at outputSpeech_{client_id}.wav")
 
             # Save the speech into a temporary file
             # with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_wav:
@@ -231,16 +231,20 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
                         asyncio.ensure_future(VAD(chunk, client_id))
                     
                     # TEMPORARY: testing purposes to see that client_speech is saved with the spoken data
-                    if client_info[client_id]['silence_found'] and client_speech[client_id].size and not client_info[client_id]['replaceTrack']:
+                    if client_info[client_id]['silence_found'] and client_speech[client_id].size:
                         # print(type(client_speech[client_id])
                         # print("VAD detected speech, LLM would read", client_speech[client_id], client_speech[client_id].shape)
                         print('popped')
                         await asyncio.sleep(0.001)
-                        audio_sender.replaceTrack(MediaPlayer(client_id+'_outputSpeech.wav').audio)
-                        client_info[client_id]['replaceTrack'] = True
-                        # audio_sender.replaceTrack(MediaPlayer("./serverToClient.wav").audio)
-                        # Start coroutine to send audio back to client
 
+                        # Use replaceTrack flag to replace the track with the saved outputSpeech just once instead of replacing in a loop
+                        if not client_info[client_id]['replaceTrack']:
+                            audio_sender.replaceTrack(MediaPlayer('outputSpeech_'+client_id+'.wav').audio)
+                            client_info[client_id]['replaceTrack'] = True
+                            print("Replaced the track with saved audio for the client")
+
+                        # Start coroutine to handle interrupts
+                        # for example: if audio is streaming back to client and client speaks in the middle, replaceTrack(AudioStreamTrack()) with silence
                         asyncio.ensure_future(send_audio_back(audio_sender, client_id))
 
                         # raise SystemExit
