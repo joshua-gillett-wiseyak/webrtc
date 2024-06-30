@@ -18,7 +18,7 @@ async def run(client_id):
     # print(id(pc))
     channel = pc.createDataChannel("chat")
 
-    recorder = MediaRecorder(client_id+'receivedFromServer.wav')
+    recorder = MediaRecorder('receivedFromServer_'+client_id+'.wav')
 
     @channel.on("open")
     def on_open():
