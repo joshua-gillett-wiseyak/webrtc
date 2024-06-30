@@ -29,7 +29,7 @@ client_info = {} # {'c1' : {'speech_tensor':'torch.tensor', 'silence_tensor':'to
 # client - dictionary mappign dictionary that stores data for the VAD logic, such as the PyTorch tensors for speech and silence, the adaptive thresholding value,
 # and the list of the probabilities for use in the adaptive thresholding logic
 
-buffer_lock = asyncio.Lock() # buffer_lock to avoid race condition
+buffer_lock = {}  # buffer_lock to avoid race condition
 
 # loading model for vad
 model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
@@ -156,7 +156,7 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
     client_audio[client_id]=np.empty(0)
     client_speech[client_id]=np.empty(0)
     client_info[client_id]={'speech_audio':torch.empty(0), 'silence_audio': torch.empty(0), 'speech_threshold':0.0, 'prob_data':[],'silence_found':False}
-
+    buffer_lock[client_id]=asyncio.Lock()
     # By default, records the received audio to a file
     # example: recorder = MediaRecorder('received_audio.wav')
     # To record the received audio to the buffer, Implement a child class to the main MediaRecorder class
@@ -212,13 +212,13 @@ async def offer_endpoint(sdp: str = Form(...), type: str = Form(...), client_id:
 
     # start writing to buffer with buffer_lock
     async def start_recorder(recorder): 
-        async with buffer_lock:
+        async with buffer_lock[client_id]:
             await recorder.start()
     
     async def read_buffer_chunks(audio_sender,client_id):
         while True:
             await asyncio.sleep(0.01)  # adjust the sleep time based on your requirements
-            async with buffer_lock:
+            async with buffer_lock[client_id]:
                 audio_buffer = client_buffer[client_id]
                 audio_buffer.seek(0, io.SEEK_END)
                 size = audio_buffer.tell()
