@@ -18,7 +18,7 @@ async def run(client_id):
     # print(id(pc))
     channel = pc.createDataChannel("chat")
 
-    recorder = MediaRecorder('./receivedFromServer.wav')
+    recorder = MediaRecorder('receivedFromServer_'+client_id+'.wav')
 
     @channel.on("open")
     def on_open():
@@ -35,7 +35,7 @@ async def run(client_id):
         print(f"Track{track.kind} received. Make sure .start() is called to start recording")
 
         if track.kind == "audio":
-            recorder.add(track)
+            recorder.addTrack(track)
             await recorder.start()
             
         @track.on("ended")
